@@ -646,8 +646,40 @@ void GfxRenderingAPIOGL::DrawTriangles(float buf_vbo[], size_t buf_vbo_len, size
 
     SetPerDrawUniforms();
 
-    // printf("flushing %d tris\n", buf_vbo_num_tris);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(float) * buf_vbo_len, buf_vbo, GL_STREAM_DRAW);
+    // Performance Optimization: Buffer orphaning strategy to avoid GPU-CPU synchronization
+    //
+    // Previously: glBufferData() was called every frame with data, causing:
+    // - Implicit synchronization point (CPU waits for GPU to finish using the buffer)
+    // - Per-frame buffer allocation overhead
+    // - Pipeline stalls when GPU is still reading from the buffer
+    //
+    // New approach - Buffer orphaning:
+    // 1. Grow buffer size if needed (doubling strategy to amortize allocations)
+    // 2. Call glBufferData(NULL) to "orphan" the old buffer - tells driver to discard it
+    //    without waiting for GPU, and allocate new storage
+    // 3. Use glBufferSubData() to upload data to the orphaned buffer
+    //
+    // This allows the GPU to continue using the old buffer while we write to the new one,
+    // eliminating the synchronization point and matching DirectX11's D3D11_MAP_WRITE_DISCARD.
+    //
+    // Expected improvement: 20-30% frame time reduction by removing buffer allocation stalls.
+    // See: OPENGL_PERFORMANCE_PLAN.md Task 2
+
+    const size_t requiredSize = sizeof(float) * buf_vbo_len;
+
+    // Grow buffer if needed (double the size to amortize reallocation cost)
+    if (requiredSize > mVboSize) {
+        mVboSize = requiredSize * 2; // Double to avoid frequent reallocations
+        glBufferData(GL_ARRAY_BUFFER, mVboSize, nullptr, GL_STREAM_DRAW);
+    } else {
+        // Orphan the buffer by reallocating with nullptr
+        // This tells the driver we don't care about the old contents, avoiding GPU sync
+        glBufferData(GL_ARRAY_BUFFER, mVboSize, nullptr, GL_STREAM_DRAW);
+    }
+
+    // Upload new data to the orphaned buffer (no sync point since buffer was orphaned)
+    glBufferSubData(GL_ARRAY_BUFFER, 0, requiredSize, buf_vbo);
+
     glDrawArrays(GL_TRIANGLES, 0, 3 * buf_vbo_num_tris);
 }
 
@@ -656,8 +688,14 @@ void GfxRenderingAPIOGL::Init() {
     glewInit();
 #endif
 
+    // Performance Optimization: Allocate initial VBO with buffer orphaning strategy
+    // Start with 1MB buffer to avoid frequent reallocations during initial frames.
+    // The buffer will grow dynamically if needed (see DrawTriangles).
+    constexpr size_t INITIAL_VBO_SIZE = 1024 * 1024; // 1MB
     glGenBuffers(1, &mOpenglVbo);
     glBindBuffer(GL_ARRAY_BUFFER, mOpenglVbo);
+    glBufferData(GL_ARRAY_BUFFER, INITIAL_VBO_SIZE, nullptr, GL_STREAM_DRAW);
+    mVboSize = INITIAL_VBO_SIZE;
 
 #if defined(__APPLE__) || defined(USE_OPENGLES)
     glGenVertexArrays(1, &mOpenglVao);

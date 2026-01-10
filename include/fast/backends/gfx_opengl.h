@@ -113,6 +113,7 @@ class GfxRenderingAPIOGL final : public GfxRenderingAPI {
     ShaderProgram* mCurrentShaderProgram;
 
     GLuint mOpenglVbo = 0;
+    size_t mVboSize = 0; // Current VBO size in bytes for buffer orphaning strategy
 #if defined(__APPLE__) || defined(USE_OPENGLES)
     GLuint mOpenglVao;
 #endif
