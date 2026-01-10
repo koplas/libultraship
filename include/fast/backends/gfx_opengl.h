@@ -100,6 +100,43 @@ class GfxRenderingAPIOGL final : public GfxRenderingAPI {
     std::string BuildFsShader(const CCFeatures& cc_features);
     void SetPerDrawUniforms();
 
+    // Performance Optimization: Comprehensive state cache to prevent redundant GL calls
+    // Tracks current GL state to avoid unnecessary state changes (matching DX11 backend approach)
+    struct BlendState {
+        bool enabled = false;
+        bool operator!=(const BlendState& other) const {
+            return enabled != other.enabled;
+        }
+    };
+
+    struct ViewportState {
+        GLint x = -1;
+        GLint y = -1;
+        GLsizei width = -1;
+        GLsizei height = -1;
+        bool operator!=(const ViewportState& other) const {
+            return x != other.x || y != other.y || width != other.width || height != other.height;
+        }
+    };
+
+    struct ScissorState {
+        GLint x = -1;
+        GLint y = -1;
+        GLsizei width = -1;
+        GLsizei height = -1;
+        bool operator!=(const ScissorState& other) const {
+            return x != other.x || y != other.y || width != other.width || height != other.height;
+        }
+    };
+
+    // State cache members
+    ShaderProgram* mLastBoundShaderProgram = nullptr;
+    GLuint mLastBoundTextures[SHADER_MAX_TEXTURES] = {0};
+    GLenum mLastActiveTextureUnit = GL_TEXTURE0;
+    BlendState mLastBlendState;
+    ViewportState mLastViewportState;
+    ScissorState mLastScissorState;
+
     struct TextureInfo {
         uint16_t width;
         uint16_t height;

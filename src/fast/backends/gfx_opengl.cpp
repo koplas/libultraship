@@ -83,7 +83,13 @@ void GfxRenderingAPIOGL::UnloadShader(ShaderProgram* old_prg) {
 void GfxRenderingAPIOGL::LoadShader(ShaderProgram* new_prg) {
     // if (!new_prg) return;
     mCurrentShaderProgram = new_prg;
-    glUseProgram(new_prg->openglProgramId);
+
+    // Performance Optimization: Only bind shader program if it changed
+    if (mLastBoundShaderProgram != new_prg) {
+        glUseProgram(new_prg->openglProgramId);
+        mLastBoundShaderProgram = new_prg;
+    }
+
     VertexArraySetAttribs(new_prg);
     SetUniforms(new_prg);
 }
@@ -529,8 +535,24 @@ void GfxRenderingAPIOGL::DeleteTexture(uint32_t texID) {
 }
 
 void GfxRenderingAPIOGL::SelectTexture(int tile, GLuint texture_id) {
-    glActiveTexture(GL_TEXTURE0 + tile);
-    glBindTexture(GL_TEXTURE_2D, texture_id);
+    // Performance Optimization: Only bind texture if it changed or if we're on a different texture unit
+    // This reduces redundant glActiveTexture and glBindTexture calls
+    const GLenum textureUnit = GL_TEXTURE0 + tile;
+
+    if (mLastBoundTextures[tile] != texture_id || mLastActiveTextureUnit != textureUnit) {
+        // Activate texture unit only if it changed
+        if (mLastActiveTextureUnit != textureUnit) {
+            glActiveTexture(textureUnit);
+            mLastActiveTextureUnit = textureUnit;
+        }
+
+        // Bind texture only if it changed for this unit
+        if (mLastBoundTextures[tile] != texture_id) {
+            glBindTexture(GL_TEXTURE_2D, texture_id);
+            mLastBoundTextures[tile] = texture_id;
+        }
+    }
+
     mCurrentTextureIds[tile] = texture_id;
     mCurrentTile = tile;
 }
@@ -560,7 +582,13 @@ static uint32_t gfx_cm_to_opengl(uint32_t val) {
 }
 
 void GfxRenderingAPIOGL::SetSamplerParameters(int tile, bool linear_filter, uint32_t cms, uint32_t cmt) {
-    glActiveTexture(GL_TEXTURE0 + tile);
+    // Performance Optimization: Only activate texture unit if it changed
+    const GLenum textureUnit = GL_TEXTURE0 + tile;
+    if (mLastActiveTextureUnit != textureUnit) {
+        glActiveTexture(textureUnit);
+        mLastActiveTextureUnit = textureUnit;
+    }
+
     const GLint filter = linear_filter && mCurrentFilterMode == FILTER_LINEAR ? GL_LINEAR : GL_NEAREST;
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
@@ -579,18 +607,34 @@ void GfxRenderingAPIOGL::SetZmodeDecal(bool zmode_decal) {
 }
 
 void GfxRenderingAPIOGL::SetViewport(int x, int y, int width, int height) {
-    glViewport(x, y, width, height);
+    // Performance Optimization: Only set viewport if it actually changed
+    ViewportState newState = {static_cast<GLint>(x), static_cast<GLint>(y), static_cast<GLsizei>(width),
+                              static_cast<GLsizei>(height)};
+    if (mLastViewportState != newState) {
+        glViewport(x, y, width, height);
+        mLastViewportState = newState;
+    }
 }
 
 void GfxRenderingAPIOGL::SetScissor(int x, int y, int width, int height) {
-    glScissor(x, y, width, height);
+    // Performance Optimization: Only set scissor if it actually changed
+    ScissorState newState = {static_cast<GLint>(x), static_cast<GLint>(y), static_cast<GLsizei>(width),
+                             static_cast<GLsizei>(height)};
+    if (mLastScissorState != newState) {
+        glScissor(x, y, width, height);
+        mLastScissorState = newState;
+    }
 }
 
 void GfxRenderingAPIOGL::SetUseAlpha(bool use_alpha) {
-    if (use_alpha) {
-        glEnable(GL_BLEND);
-    } else {
-        glDisable(GL_BLEND);
+    // Performance Optimization: Only enable/disable blend if state changed
+    if (mLastBlendState.enabled != use_alpha) {
+        if (use_alpha) {
+            glEnable(GL_BLEND);
+        } else {
+            glDisable(GL_BLEND);
+        }
+        mLastBlendState.enabled = use_alpha;
     }
 }
 
@@ -886,8 +930,19 @@ void* GfxRenderingAPIOGL::GetFramebufferTextureId(int fb_id) {
 
 void GfxRenderingAPIOGL::SelectTextureFb(int fb_id) {
     // glDisable(GL_DEPTH_TEST);
-    glActiveTexture(GL_TEXTURE0 + 0);
-    glBindTexture(GL_TEXTURE_2D, mFrameBuffers[fb_id].clrbuf);
+    // Performance Optimization: Track state changes for framebuffer texture binding
+    const GLenum textureUnit = GL_TEXTURE0;
+    const GLuint fbTexture = mFrameBuffers[fb_id].clrbuf;
+
+    if (mLastActiveTextureUnit != textureUnit) {
+        glActiveTexture(textureUnit);
+        mLastActiveTextureUnit = textureUnit;
+    }
+
+    if (mLastBoundTextures[0] != fbTexture) {
+        glBindTexture(GL_TEXTURE_2D, fbTexture);
+        mLastBoundTextures[0] = fbTexture;
+    }
 }
 
 void GfxRenderingAPIOGL::CopyFramebuffer(int fb_dst_id, int fb_src_id, int srcX0, int srcY0, int srcX1, int srcY1,
