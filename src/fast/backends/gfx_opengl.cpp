@@ -241,7 +241,6 @@ std::string GfxRenderingAPIOGL::BuildFsShader(const CCFeatures& cc_features) {
         { "o_textures", M_ARRAY(cc_features.usedTextures, bool, 2) },
         { "o_masks", M_ARRAY(cc_features.used_masks, bool, 2) },
         { "o_blend", M_ARRAY(cc_features.used_blend, bool, 2) },
-        { "o_clamp", M_ARRAY(cc_features.clamp, bool, 2, 2) },
         { "o_inputs", cc_features.numInputs },
         { "o_do_mix", M_ARRAY(cc_features.do_mix, bool, 2, 2) },
         { "o_do_single", M_ARRAY(cc_features.do_single, bool, 2, 2) },
@@ -325,7 +324,6 @@ static std::string BuildVsShader(const CCFeatures& cc_features) {
     numFloats = 4;
     prism::Processor processor;
     prism::ContextItems mContext = { { "o_textures", M_ARRAY(cc_features.usedTextures, bool, 2) },
-                                     { "o_clamp", M_ARRAY(cc_features.clamp, bool, 2, 2) },
                                      { "o_fog", cc_features.opt_fog },
                                      { "o_grayscale", cc_features.opt_grayscale },
                                      { "o_alpha", cc_features.opt_alpha },
@@ -428,15 +426,6 @@ ShaderProgram* GfxRenderingAPIOGL::CreateAndLoadNewShader(uint64_t shader_id0, u
             prg->attribLocations[cnt] = glGetAttribLocation(shader_program, name);
             prg->attribSizes[cnt] = 2;
             ++cnt;
-
-            for (int j = 0; j < 2; j++) {
-                if (cc_features.clamp[i][j]) {
-                    sprintf(name, "aTexClamp%s%d", j == 0 ? "S" : "T", i);
-                    prg->attribLocations[cnt] = glGetAttribLocation(shader_program, name);
-                    prg->attribSizes[cnt] = 1;
-                    ++cnt;
-                }
-            }
         }
     }
 
@@ -476,6 +465,7 @@ ShaderProgram* GfxRenderingAPIOGL::CreateAndLoadNewShader(uint64_t shader_id0, u
     prg->texture_width_location = glGetUniformLocation(shader_program, "texture_width");
     prg->texture_height_location = glGetUniformLocation(shader_program, "texture_height");
     prg->texture_filtering_location = glGetUniformLocation(shader_program, "texture_filtering");
+    prg->texClampLocation = glGetUniformLocation(shader_program, "texClamp");
 
     LoadShader(prg);
 
@@ -591,6 +581,12 @@ void GfxRenderingAPIOGL::SetUseAlpha(bool use_alpha) {
         glEnable(GL_BLEND);
     } else {
         glDisable(GL_BLEND);
+    }
+}
+
+void GfxRenderingAPIOGL::SetTextureClamp(float texClamp[2][4]) {
+    if (mCurrentShaderProgram != nullptr && mCurrentShaderProgram->texClampLocation >= 0) {
+        glUniform4fv(mCurrentShaderProgram->texClampLocation, 2, &texClamp[0][0]);
     }
 }
 

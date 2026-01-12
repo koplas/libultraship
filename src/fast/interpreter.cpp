@@ -1593,10 +1593,9 @@ void Interpreter::GfxSpTri1(uint8_t vtx1_idx, uint8_t vtx2_idx, uint8_t vtx3_idx
         }
     }
 
-    struct ShaderProgram* prg = comb->prg[tm];
+    struct ShaderProgram* prg = comb->prg;
     if (prg == NULL) {
-        comb->prg[tm] = prg =
-            LookupOrCreateShaderProgram(comb->shader_id0, comb->shader_id1 | tm * SHADER_OPT(TEXEL0_CLAMP_S));
+        comb->prg = prg = LookupOrCreateShaderProgram(comb->shader_id0, comb->shader_id1);
     }
     if (prg != mRenderingState.mShaderProgram) {
         Flush();
@@ -1604,6 +1603,18 @@ void Interpreter::GfxSpTri1(uint8_t vtx1_idx, uint8_t vtx2_idx, uint8_t vtx3_idx
         mRapi->LoadShader(prg);
         mRenderingState.mShaderProgram = prg;
     }
+
+    // Set texture clamping uniforms
+    float texClamp[2][4]; // [texture][x=clampS, y=clampT, z=enableS, w=enableT]
+    for (int t = 0; t < 2; t++) {
+        bool clampS = tm & (1 << 2 * t);
+        bool clampT = tm & (1 << 2 * t + 1);
+        texClamp[t][0] = clampS ? (tex_width2[t] - 0.5f) / tex_width[t] : 1.0f;
+        texClamp[t][1] = clampT ? (tex_height2[t] - 0.5f) / tex_height[t] : 1.0f;
+        texClamp[t][2] = clampS ? 1.0f : 0.0f;
+        texClamp[t][3] = clampT ? 1.0f : 0.0f;
+    }
+    mRapi->SetTextureClamp(texClamp);
     if (use_alpha != mRenderingState.alpha_blend) {
         Flush();
         mRapi->SetUseAlpha(use_alpha);
@@ -1664,17 +1675,6 @@ void Interpreter::GfxSpTri1(uint8_t vtx1_idx, uint8_t vtx2_idx, uint8_t vtx3_idx
 
             mBufVbo[mBufVboLen++] = u / tex_width[t];
             mBufVbo[mBufVboLen++] = v / tex_height[t];
-
-            bool clampS = tm & (1 << 2 * t);
-            bool clampT = tm & (1 << 2 * t + 1);
-
-            if (clampS) {
-                mBufVbo[mBufVboLen++] = (tex_width2[t] - 0.5f) / tex_width[t];
-            }
-
-            if (clampT) {
-                mBufVbo[mBufVboLen++] = (tex_height2[t] - 0.5f) / tex_height[t];
-            }
         }
 
         if (use_fog) {
@@ -4613,11 +4613,6 @@ void gfx_cc_get_features(uint64_t shader_id0, uint32_t shader_id1, struct CCFeat
     cc_features->opt_alpha_threshold = (shader_id1 & SHADER_OPT(ALPHA_THRESHOLD)) != 0;
     cc_features->opt_invisible = (shader_id1 & SHADER_OPT(INVISIBLE)) != 0;
     cc_features->opt_grayscale = (shader_id1 & SHADER_OPT(GRAYSCALE)) != 0;
-
-    cc_features->clamp[0][0] = shader_id1 & SHADER_OPT(TEXEL0_CLAMP_S);
-    cc_features->clamp[0][1] = shader_id1 & SHADER_OPT(TEXEL0_CLAMP_T);
-    cc_features->clamp[1][0] = shader_id1 & SHADER_OPT(TEXEL1_CLAMP_S);
-    cc_features->clamp[1][1] = shader_id1 & SHADER_OPT(TEXEL1_CLAMP_T);
 
     if (shader_id1 & SHADER_OPT(USE_SHADER)) {
         cc_features->shader_id = (shader_id1 >> 17) & 0xFFFF;

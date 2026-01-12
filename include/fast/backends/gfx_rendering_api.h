@@ -47,6 +47,7 @@ class GfxRenderingAPI {
     virtual void SetViewport(int x, int y, int width, int height) = 0;
     virtual void SetScissor(int x, int y, int width, int height) = 0;
     virtual void SetUseAlpha(bool useAlpha) = 0;
+    virtual void SetTextureClamp(float texClamp[2][4]) = 0;
     virtual void DrawTriangles(float buf_vbo[], size_t buf_vbo_len, size_t buf_vbo_num_tris) = 0;
     virtual void Init() = 0;
     virtual void OnResize() = 0;

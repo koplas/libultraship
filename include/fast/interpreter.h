@@ -110,7 +110,6 @@ struct CCFeatures {
     bool usedTextures[2];
     bool used_masks[2];
     bool used_blend[2];
-    bool clamp[2][2];
     int numInputs;
     bool do_single[2][2];
     bool do_multiply[2][2];
@@ -327,7 +326,7 @@ struct ColorCombiner {
     uint64_t shader_id0;
     uint32_t shader_id1;
     bool usedTextures[2];
-    struct ShaderProgram* prg[16];
+    struct ShaderProgram* prg;
     uint8_t shader_input_mapping[2][7];
 };
 

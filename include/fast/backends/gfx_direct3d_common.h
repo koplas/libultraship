@@ -86,6 +86,7 @@ class GfxRenderingAPIDX11 final : public GfxRenderingAPI {
     void SetViewport(int x, int y, int width, int height) override;
     void SetScissor(int x, int y, int width, int height) override;
     void SetUseAlpha(bool useAlpha) override;
+    void SetTextureClamp(float texClamp[2][4]) override;
     void DrawTriangles(float buf_vbo[], size_t buf_vbo_len, size_t buf_vbo_num_tris) override;
     void Init() override;
     void OnResize() override;

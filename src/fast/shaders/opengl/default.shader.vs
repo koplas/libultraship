@@ -9,18 +9,6 @@
         @{attr} vec2 aTexCoord@{i};
         @{out} vec2 vTexCoord@{i};
         @{update_floats(2)}
-        @for(j in 0..2)
-            @if(o_clamp[i][j])
-                @if(j == 0)
-                    @{attr} float aTexClampS@{i};
-                    @{out} float vTexClampS@{i};
-                @else
-                    @{attr} float aTexClampT@{i};
-                    @{out} float vTexClampT@{i};
-                @end
-                @{update_floats(1)}
-            @end
-        @end
     @end
 @end
 
@@ -52,15 +40,6 @@ void main() {
      @for(i in 0..2)
         @if(o_textures[i])
             vTexCoord@{i} = aTexCoord@{i};
-            @for(j in 0..2)
-                @if(o_clamp[i][j])
-                    @if(j == 0)
-                        vTexClampS@{i} = aTexClampS@{i};
-                    @else
-                        vTexClampT@{i} = aTexClampT@{i};
-                    @end
-                @end
-            @end
         @end
     @end
     @if(o_fog)

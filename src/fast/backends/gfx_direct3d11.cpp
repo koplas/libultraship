@@ -571,6 +571,10 @@ void GfxRenderingAPIDX11::SetUseAlpha(bool use_alpha) {
     // Already part of the pipeline state from shader info
 }
 
+void GfxRenderingAPIDX11::SetTextureClamp(float texClamp[2][4]) {
+    // TODO: Implement texture clamping for DirectX backend
+}
+
 void GfxRenderingAPIDX11::DrawTriangles(float buf_vbo[], size_t buf_vbo_len, size_t buf_vbo_num_tris) {
 
     if (mLastDepthTest != mCurrentDepthTest || mLastDepthMask != mCurrentDepthMask) {

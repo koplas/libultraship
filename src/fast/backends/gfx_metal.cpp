@@ -412,6 +412,10 @@ void GfxRenderingAPIMetal::SetUseAlpha(bool use_alpha) {
     // Already part of the pipeline state from shader info
 }
 
+void GfxRenderingAPIMetal::SetTextureClamp(float texClamp[2][4]) {
+    // TODO: Implement texture clamping for Metal backend
+}
+
 void GfxRenderingAPIMetal::DrawTriangles(float buf_vbo[], size_t buf_vbo_len, size_t buf_vbo_num_tris) {
     NS::AutoreleasePool* autorelease_pool = NS::AutoreleasePool::alloc()->init();
 

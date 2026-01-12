@@ -9,15 +9,6 @@ out vec4 vOutColor;
 @for(i in 0..2)
     @if(o_textures[i])
         @{attr} vec2 vTexCoord@{i};
-        @for(j in 0..2)
-            @if(o_clamp[i][j])
-                @if(j == 0)
-                    @{attr} float vTexClampS@{i};
-                @else
-                    @{attr} float vTexClampT@{i};
-                @end
-            @end
-        @end
     @end
 @end
 
@@ -47,6 +38,7 @@ uniform float noise_scale;
 uniform int texture_width[2];
 uniform int texture_height[2];
 uniform int texture_filtering[2];
+uniform vec4 texClamp[2]; // x=clampS, y=clampT, z=enableS, w=enableT
 
 #define TEX_OFFSET(off) @{texture}(tex, texCoord - off / texSize)
 #define WRAP(x, low, high) mod((x)-(low), (high)-(low)) + (low)
@@ -86,22 +78,16 @@ vec4 hookTexture2D(in int id, sampler2D tex, in vec2 uv, in vec2 texSize) {
 void main() {
     @for(i in 0..2)
         @if(o_textures[i])
-            @{s = o_clamp[i][0]}
-            @{t = o_clamp[i][1]}
-
             vec2 texSize@{i} = TEX_SIZE(@{i});
 
-            @if(!s && !t)
-                vec2 vTexCoordAdj@{i} = vTexCoord@{i};
-            @else
-                @if(s && t)
-                    vec2 vTexCoordAdj@{i} = clamp(vTexCoord@{i}, 0.5 / texSize@{i}, vec2(vTexClampS@{i}, vTexClampT@{i}));
-                @elseif(s)
-                    vec2 vTexCoordAdj@{i} = vec2(clamp(vTexCoord@{i}.s, 0.5 / texSize@{i}.s, vTexClampS@{i}), vTexCoord@{i}.t);
-                @else
-                    vec2 vTexCoordAdj@{i} = vec2(vTexCoord@{i}.s, clamp(vTexCoord@{i}.t, 0.5 / texSize@{i}.t, vTexClampT@{i}));
-                @end
-            @end
+            // Dynamic texture coordinate clamping
+            vec2 vTexCoordAdj@{i} = vTexCoord@{i};
+            vec2 minClamp = 0.5 / texSize@{i};
+            vec2 maxClamp = texClamp[@{i}].xy;
+            vec2 enableClamp = texClamp[@{i}].zw;
+
+            vTexCoordAdj@{i}.s = mix(vTexCoordAdj@{i}.s, clamp(vTexCoordAdj@{i}.s, minClamp.s, maxClamp.x), enableClamp.x);
+            vTexCoordAdj@{i}.t = mix(vTexCoordAdj@{i}.t, clamp(vTexCoordAdj@{i}.t, minClamp.t, maxClamp.y), enableClamp.y);
 
             vec4 texVal@{i} = hookTexture2D(@{i}, uTex@{i}, vTexCoordAdj@{i}, texSize@{i});
 
