@@ -26,6 +26,7 @@
 
 #include "fast/interpreter.h"
 #include "fast/lus_gbi.h"
+#include "fast/simd_utils.h"
 #include "fast/backends/gfx_window_manager_api.h"
 #include "fast/backends/gfx_rendering_api.h"
 
@@ -1164,21 +1165,47 @@ void Interpreter::GfxSpVertex(size_t n_vertices, size_t dest_index, const F3DVtx
             return;
         }
 
-        float x = v->ob[0] * mRsp->MP_matrix[0][0] + v->ob[1] * mRsp->MP_matrix[1][0] +
-                  v->ob[2] * mRsp->MP_matrix[2][0] + mRsp->MP_matrix[3][0];
-        float y = v->ob[0] * mRsp->MP_matrix[0][1] + v->ob[1] * mRsp->MP_matrix[1][1] +
-                  v->ob[2] * mRsp->MP_matrix[2][1] + mRsp->MP_matrix[3][1];
-        float z = v->ob[0] * mRsp->MP_matrix[0][2] + v->ob[1] * mRsp->MP_matrix[1][2] +
-                  v->ob[2] * mRsp->MP_matrix[2][2] + mRsp->MP_matrix[3][2];
-        float w = v->ob[0] * mRsp->MP_matrix[0][3] + v->ob[1] * mRsp->MP_matrix[1][3] +
-                  v->ob[2] * mRsp->MP_matrix[2][3] + mRsp->MP_matrix[3][3];
+        // SIMD-optimized matrix-vector multiplication for projection
+        float x, y, z, w;
+#if defined(SIMD_SSE2_ENABLED)
+        __m128 result = SIMD::MatrixVecMul4x4(v->ob[0], v->ob[1], v->ob[2], mRsp->MP_matrix);
+        float xyzw[4];
+        _mm_storeu_ps(xyzw, result);
+        x = xyzw[0];
+        y = xyzw[1];
+        z = xyzw[2];
+        w = xyzw[3];
+#elif defined(SIMD_NEON_ENABLED)
+        float32x4_t result = SIMD::MatrixVecMul4x4(v->ob[0], v->ob[1], v->ob[2], mRsp->MP_matrix);
+        float xyzw[4];
+        vst1q_f32(xyzw, result);
+        x = xyzw[0];
+        y = xyzw[1];
+        z = xyzw[2];
+        w = xyzw[3];
+#else
+        // Scalar fallback
+        float xyzw[4];
+        SIMD::MatrixVecMul4x4_Scalar(xyzw, v->ob[0], v->ob[1], v->ob[2], mRsp->MP_matrix);
+        x = xyzw[0];
+        y = xyzw[1];
+        z = xyzw[2];
+        w = xyzw[3];
+#endif
 
+        // SIMD-optimized world position calculation for positional lighting
         float world_pos[3] = { 0.0 };
         if (mRsp->geometry_mode & G_LIGHTING_POSITIONAL) {
             float(*mtx)[4] = mRsp->modelview_matrix_stack[mRsp->modelview_matrix_stack_size - 1];
-            world_pos[0] = v->ob[0] * mtx[0][0] + v->ob[1] * mtx[1][0] + v->ob[2] * mtx[2][0] + mtx[3][0];
-            world_pos[1] = v->ob[0] * mtx[0][1] + v->ob[1] * mtx[1][1] + v->ob[2] * mtx[2][1] + mtx[3][1];
-            world_pos[2] = v->ob[0] * mtx[0][2] + v->ob[1] * mtx[1][2] + v->ob[2] * mtx[2][2] + mtx[3][2];
+#if defined(SIMD_SSE2_ENABLED)
+            __m128 wresult = SIMD::MatrixVecMul4x4(v->ob[0], v->ob[1], v->ob[2], mtx);
+            _mm_storeu_ps(world_pos, wresult);
+#elif defined(SIMD_NEON_ENABLED)
+            float32x4_t wresult = SIMD::MatrixVecMul4x4(v->ob[0], v->ob[1], v->ob[2], mtx);
+            vst1q_f32(world_pos, wresult);
+#else
+            SIMD::MatrixVecMul4x4_Scalar(world_pos, v->ob[0], v->ob[1], v->ob[2], mtx);
+#endif
         }
 
         x = AdjXForAspectRatio(x);
@@ -1205,13 +1232,19 @@ void Interpreter::GfxSpVertex(size_t n_vertices, size_t dest_index, const F3DVtx
             for (int i = 0; i < mRsp->current_num_lights - 1; i++) {
                 float intensity = 0;
                 if ((mRsp->geometry_mode & G_LIGHTING_POSITIONAL) && (mRsp->current_lights[i].p.unk3 != 0)) {
-                    // Calculate distance from the light to the vertex
-                    float dist_vec[3] = { mRsp->current_lights[i].p.pos[0] - world_pos[0],
-                                          mRsp->current_lights[i].p.pos[1] - world_pos[1],
-                                          mRsp->current_lights[i].p.pos[2] - world_pos[2] };
-                    float dist_sq =
-                        dist_vec[0] * dist_vec[0] + dist_vec[1] * dist_vec[1] +
-                        dist_vec[2] * dist_vec[2] * 2; // The *2 comes from GLideN64, unsure of why it does it
+                    // SIMD-optimized distance calculation
+                    float dist_vec[3];
+                    SIMD::VectorSub3(dist_vec,
+                                     world_pos[0], world_pos[1], world_pos[2],
+                                     mRsp->current_lights[i].p.pos[0],
+                                     mRsp->current_lights[i].p.pos[1],
+                                     mRsp->current_lights[i].p.pos[2]);
+
+                    float dist_sq = SIMD::DistanceSquared3(
+                        world_pos[0], world_pos[1], world_pos[2],
+                        mRsp->current_lights[i].p.pos[0],
+                        mRsp->current_lights[i].p.pos[1],
+                        mRsp->current_lights[i].p.pos[2]);
                     float dist = sqrt(dist_sq);
 
                     // Transform distance vector (which acts as a direction light vector) into model's space
@@ -1226,9 +1259,10 @@ void Interpreter::GfxSpVertex(size_t n_vertices, size_t dest_index, const F3DVtx
                         light_intensity[light_i] = std::clamp(light_intensity[light_i], -1.0f, 1.0f);
                     }
 
-                    // Adjust intensity based on surface normal and sum up total
-                    float total_intensity =
-                        light_intensity[0] * vn->n[0] + light_intensity[1] * vn->n[1] + light_intensity[2] * vn->n[2];
+                    // SIMD-optimized dot product for intensity calculation
+                    float total_intensity = SIMD::DotProduct3Char(
+                        vn->n[0], vn->n[1], vn->n[2],
+                        light_intensity[0], light_intensity[1], light_intensity[2]);
                     total_intensity = std::clamp(total_intensity, -1.0f, 1.0f);
 
                     // Attenuate intensity based on attenuation values.
@@ -1242,9 +1276,12 @@ void Interpreter::GfxSpVertex(size_t n_vertices, size_t dest_index, const F3DVtx
                                         1.0f;
                     intensity = total_intensity / attenuation;
                 } else {
-                    intensity += vn->n[0] * mRsp->current_lights_coeffs[i][0];
-                    intensity += vn->n[1] * mRsp->current_lights_coeffs[i][1];
-                    intensity += vn->n[2] * mRsp->current_lights_coeffs[i][2];
+                    // SIMD-optimized directional lighting dot product
+                    intensity = SIMD::DotProduct3Char(
+                        vn->n[0], vn->n[1], vn->n[2],
+                        mRsp->current_lights_coeffs[i][0],
+                        mRsp->current_lights_coeffs[i][1],
+                        mRsp->current_lights_coeffs[i][2]);
                     intensity /= 127.0f;
                 }
                 if (intensity > 0.0f) {
@@ -1259,13 +1296,17 @@ void Interpreter::GfxSpVertex(size_t n_vertices, size_t dest_index, const F3DVtx
             d->color.b = b > 255 ? 255 : b;
 
             if (mRsp->geometry_mode & G_TEXTURE_GEN) {
-                float dotx = 0, doty = 0;
-                dotx += vn->n[0] * mRsp->current_lookat_coeffs[0][0];
-                dotx += vn->n[1] * mRsp->current_lookat_coeffs[0][1];
-                dotx += vn->n[2] * mRsp->current_lookat_coeffs[0][2];
-                doty += vn->n[0] * mRsp->current_lookat_coeffs[1][0];
-                doty += vn->n[1] * mRsp->current_lookat_coeffs[1][1];
-                doty += vn->n[2] * mRsp->current_lookat_coeffs[1][2];
+                // SIMD-optimized texture coordinate generation dot products
+                float dotx = SIMD::DotProduct3Char(
+                    vn->n[0], vn->n[1], vn->n[2],
+                    mRsp->current_lookat_coeffs[0][0],
+                    mRsp->current_lookat_coeffs[0][1],
+                    mRsp->current_lookat_coeffs[0][2]);
+                float doty = SIMD::DotProduct3Char(
+                    vn->n[0], vn->n[1], vn->n[2],
+                    mRsp->current_lookat_coeffs[1][0],
+                    mRsp->current_lookat_coeffs[1][1],
+                    mRsp->current_lookat_coeffs[1][2]);
 
                 dotx /= 127.0f;
                 doty /= 127.0f;

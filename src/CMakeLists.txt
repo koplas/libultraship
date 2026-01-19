@@ -224,3 +224,35 @@ if ("${CMAKE_CXX_COMPILER_ID}" MATCHES "GNU|Clang")
     endif()
 endif()
 
+# =========== SIMD Optimizations ===========
+# Enable SIMD intrinsics for vertex processing optimization
+if (NON_PORTABLE)
+    message(STATUS "Enabling SIMD optimizations (non-portable build)")
+
+    if(MSVC)
+        # MSVC: Enable SSE2 (always available on x64), AVX if supported
+        if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
+            target_compile_options(libultraship PRIVATE /arch:AVX)
+        endif()
+    elseif("${CMAKE_CXX_COMPILER_ID}" MATCHES "GNU|Clang")
+        # GCC/Clang: Enable SSE2, SSE4.1, and AVX for x86_64
+        if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|amd64")
+            target_compile_options(libultraship PRIVATE -msse2 -msse4.1 -mavx)
+        # ARM: Enable NEON for ARM64
+        elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|ARM64")
+            target_compile_options(libultraship PRIVATE -march=armv8-a+simd)
+        endif()
+    endif()
+else()
+    message(STATUS "SIMD optimizations disabled (portable build). Use -DNON_PORTABLE=ON to enable.")
+
+    # Portable build: Enable only widely supported SIMD (SSE2 on x64, which is baseline)
+    if(MSVC AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
+        # SSE2 is enabled by default on x64 MSVC
+    elseif("${CMAKE_CXX_COMPILER_ID}" MATCHES "GNU|Clang")
+        if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|amd64")
+            target_compile_options(libultraship PRIVATE -msse2)
+        endif()
+    endif()
+endif()
+
