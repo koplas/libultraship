@@ -224,34 +224,55 @@ if ("${CMAKE_CXX_COMPILER_ID}" MATCHES "GNU|Clang")
     endif()
 endif()
 
-# =========== SIMD Optimizations ===========
-# Enable SIMD intrinsics for vertex processing optimization
+# =========== Auto-Vectorization Optimizations ===========
+# Enable compiler auto-vectorization for vertex processing optimization
+# The code is written to be auto-vectorization friendly without explicit intrinsics
+
 if (NON_PORTABLE)
-    message(STATUS "Enabling SIMD optimizations (non-portable build)")
+    message(STATUS "Enabling aggressive auto-vectorization (non-portable build)")
 
     if(MSVC)
-        # MSVC: Enable SSE2 (always available on x64), AVX if supported
+        # MSVC: Enable AVX/AVX2 for best auto-vectorization on x64
         if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
-            target_compile_options(libultraship PRIVATE /arch:AVX)
+            target_compile_options(libultraship PRIVATE /arch:AVX2)
         endif()
     elseif("${CMAKE_CXX_COMPILER_ID}" MATCHES "GNU|Clang")
-        # GCC/Clang: Enable SSE2, SSE4.1, and AVX for x86_64
+        # GCC/Clang: Use native architecture for maximum performance
         if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|amd64")
-            target_compile_options(libultraship PRIVATE -msse2 -msse4.1 -mavx)
-        # ARM: Enable NEON for ARM64
+            target_compile_options(libultraship PRIVATE
+                -march=native
+                -ftree-vectorize
+                $<$<CONFIG:Release>:-ffast-math>
+            )
+        # ARM: Use native architecture with NEON
         elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|ARM64")
-            target_compile_options(libultraship PRIVATE -march=armv8-a+simd)
+            target_compile_options(libultraship PRIVATE
+                -march=native
+                -ftree-vectorize
+            )
         endif()
+
+        # Optional: Enable vectorization reports (comment out for production)
+        # target_compile_options(libultraship PRIVATE -fopt-info-vec-optimized)
     endif()
 else()
-    message(STATUS "SIMD optimizations disabled (portable build). Use -DNON_PORTABLE=ON to enable.")
+    message(STATUS "Portable build with baseline auto-vectorization. Use -DNON_PORTABLE=ON for maximum performance.")
 
-    # Portable build: Enable only widely supported SIMD (SSE2 on x64, which is baseline)
-    if(MSVC AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
-        # SSE2 is enabled by default on x64 MSVC
+    if(MSVC)
+        # MSVC: SSE2 is baseline on x64, enables basic auto-vectorization
+        if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
+            # /arch:SSE2 is default on x64, no need to specify
+        endif()
     elseif("${CMAKE_CXX_COMPILER_ID}" MATCHES "GNU|Clang")
+        # GCC/Clang: Enable vectorization with portable SSE2 baseline
         if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|amd64")
-            target_compile_options(libultraship PRIVATE -msse2)
+            target_compile_options(libultraship PRIVATE
+                -msse2
+                -ftree-vectorize
+            )
+        # ARM64: NEON is standard, just enable vectorization
+        elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|ARM64")
+            target_compile_options(libultraship PRIVATE -ftree-vectorize)
         endif()
     endif()
 endif()

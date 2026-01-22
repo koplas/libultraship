@@ -1165,47 +1165,23 @@ void Interpreter::GfxSpVertex(size_t n_vertices, size_t dest_index, const F3DVtx
             return;
         }
 
-        // SIMD-optimized matrix-vector multiplication for projection
-        float x, y, z, w;
-#if defined(SIMD_SSE2_ENABLED)
-        __m128 result = SIMD::MatrixVecMul4x4(v->ob[0], v->ob[1], v->ob[2], mRsp->MP_matrix);
+        // Auto-vectorized matrix-vector multiplication for projection
         float xyzw[4];
-        _mm_storeu_ps(xyzw, result);
-        x = xyzw[0];
-        y = xyzw[1];
-        z = xyzw[2];
-        w = xyzw[3];
-#elif defined(SIMD_NEON_ENABLED)
-        float32x4_t result = SIMD::MatrixVecMul4x4(v->ob[0], v->ob[1], v->ob[2], mRsp->MP_matrix);
-        float xyzw[4];
-        vst1q_f32(xyzw, result);
-        x = xyzw[0];
-        y = xyzw[1];
-        z = xyzw[2];
-        w = xyzw[3];
-#else
-        // Scalar fallback
-        float xyzw[4];
-        SIMD::MatrixVecMul4x4_Scalar(xyzw, v->ob[0], v->ob[1], v->ob[2], mRsp->MP_matrix);
-        x = xyzw[0];
-        y = xyzw[1];
-        z = xyzw[2];
-        w = xyzw[3];
-#endif
+        VecMath::MatrixVecMul4x4(xyzw, v->ob[0], v->ob[1], v->ob[2], mRsp->MP_matrix);
+        float x = xyzw[0];
+        float y = xyzw[1];
+        float z = xyzw[2];
+        float w = xyzw[3];
 
-        // SIMD-optimized world position calculation for positional lighting
-        float world_pos[3] = { 0.0 };
+        // Auto-vectorized world position calculation for positional lighting
+        float world_pos[3] = { 0.0f, 0.0f, 0.0f };
         if (mRsp->geometry_mode & G_LIGHTING_POSITIONAL) {
             float(*mtx)[4] = mRsp->modelview_matrix_stack[mRsp->modelview_matrix_stack_size - 1];
-#if defined(SIMD_SSE2_ENABLED)
-            __m128 wresult = SIMD::MatrixVecMul4x4(v->ob[0], v->ob[1], v->ob[2], mtx);
-            _mm_storeu_ps(world_pos, wresult);
-#elif defined(SIMD_NEON_ENABLED)
-            float32x4_t wresult = SIMD::MatrixVecMul4x4(v->ob[0], v->ob[1], v->ob[2], mtx);
-            vst1q_f32(world_pos, wresult);
-#else
-            SIMD::MatrixVecMul4x4_Scalar(world_pos, v->ob[0], v->ob[1], v->ob[2], mtx);
-#endif
+            float world_pos_4[4];
+            VecMath::MatrixVecMul4x4(world_pos_4, v->ob[0], v->ob[1], v->ob[2], mtx);
+            world_pos[0] = world_pos_4[0];
+            world_pos[1] = world_pos_4[1];
+            world_pos[2] = world_pos_4[2];
         }
 
         x = AdjXForAspectRatio(x);
@@ -1232,19 +1208,11 @@ void Interpreter::GfxSpVertex(size_t n_vertices, size_t dest_index, const F3DVtx
             for (int i = 0; i < mRsp->current_num_lights - 1; i++) {
                 float intensity = 0;
                 if ((mRsp->geometry_mode & G_LIGHTING_POSITIONAL) && (mRsp->current_lights[i].p.unk3 != 0)) {
-                    // SIMD-optimized distance calculation
+                    // Auto-vectorized distance calculation
                     float dist_vec[3];
-                    SIMD::VectorSub3(dist_vec,
-                                     world_pos[0], world_pos[1], world_pos[2],
-                                     mRsp->current_lights[i].p.pos[0],
-                                     mRsp->current_lights[i].p.pos[1],
-                                     mRsp->current_lights[i].p.pos[2]);
+                    VecMath::VectorSub3(dist_vec, world_pos, mRsp->current_lights[i].p.pos);
 
-                    float dist_sq = SIMD::DistanceSquared3(
-                        world_pos[0], world_pos[1], world_pos[2],
-                        mRsp->current_lights[i].p.pos[0],
-                        mRsp->current_lights[i].p.pos[1],
-                        mRsp->current_lights[i].p.pos[2]);
+                    float dist_sq = VecMath::DistanceSquared3(world_pos, mRsp->current_lights[i].p.pos);
                     float dist = sqrt(dist_sq);
 
                     // Transform distance vector (which acts as a direction light vector) into model's space
@@ -1259,10 +1227,8 @@ void Interpreter::GfxSpVertex(size_t n_vertices, size_t dest_index, const F3DVtx
                         light_intensity[light_i] = std::clamp(light_intensity[light_i], -1.0f, 1.0f);
                     }
 
-                    // SIMD-optimized dot product for intensity calculation
-                    float total_intensity = SIMD::DotProduct3Char(
-                        vn->n[0], vn->n[1], vn->n[2],
-                        light_intensity[0], light_intensity[1], light_intensity[2]);
+                    // Auto-vectorized dot product for intensity calculation
+                    float total_intensity = VecMath::DotProduct3Char(vn->n, light_intensity);
                     total_intensity = std::clamp(total_intensity, -1.0f, 1.0f);
 
                     // Attenuate intensity based on attenuation values.
@@ -1276,12 +1242,8 @@ void Interpreter::GfxSpVertex(size_t n_vertices, size_t dest_index, const F3DVtx
                                         1.0f;
                     intensity = total_intensity / attenuation;
                 } else {
-                    // SIMD-optimized directional lighting dot product
-                    intensity = SIMD::DotProduct3Char(
-                        vn->n[0], vn->n[1], vn->n[2],
-                        mRsp->current_lights_coeffs[i][0],
-                        mRsp->current_lights_coeffs[i][1],
-                        mRsp->current_lights_coeffs[i][2]);
+                    // Auto-vectorized directional lighting dot product
+                    intensity = VecMath::DotProduct3Char(vn->n, mRsp->current_lights_coeffs[i]);
                     intensity /= 127.0f;
                 }
                 if (intensity > 0.0f) {
@@ -1296,17 +1258,9 @@ void Interpreter::GfxSpVertex(size_t n_vertices, size_t dest_index, const F3DVtx
             d->color.b = b > 255 ? 255 : b;
 
             if (mRsp->geometry_mode & G_TEXTURE_GEN) {
-                // SIMD-optimized texture coordinate generation dot products
-                float dotx = SIMD::DotProduct3Char(
-                    vn->n[0], vn->n[1], vn->n[2],
-                    mRsp->current_lookat_coeffs[0][0],
-                    mRsp->current_lookat_coeffs[0][1],
-                    mRsp->current_lookat_coeffs[0][2]);
-                float doty = SIMD::DotProduct3Char(
-                    vn->n[0], vn->n[1], vn->n[2],
-                    mRsp->current_lookat_coeffs[1][0],
-                    mRsp->current_lookat_coeffs[1][1],
-                    mRsp->current_lookat_coeffs[1][2]);
+                // Auto-vectorized texture coordinate generation dot products
+                float dotx = VecMath::DotProduct3Char(vn->n, mRsp->current_lookat_coeffs[0]);
+                float doty = VecMath::DotProduct3Char(vn->n, mRsp->current_lookat_coeffs[1]);
 
                 dotx /= 127.0f;
                 doty /= 127.0f;
