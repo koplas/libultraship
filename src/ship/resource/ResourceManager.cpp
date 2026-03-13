@@ -142,7 +142,7 @@ std::shared_ptr<IResource> ResourceManager::LoadResourceProcess(const ResourceId
     auto file = LoadFileProcess(identifier.Path);
     if (file == nullptr) {
         SPDLOG_TRACE("Failed to load resource file at path {}", identifier.Path);
-        const std::lock_guard<std::mutex> lock(mMutex);
+        const std::unique_lock<std::shared_mutex> lock(mMutex);
         mResourceCache[identifier] = ResourceLoadError::NotFound;
         return nullptr;
     }
@@ -153,7 +153,7 @@ std::shared_ptr<IResource> ResourceManager::LoadResourceProcess(const ResourceId
     // Another thread could have loaded the resource while we were processing, so we want to check before setting to
     // the cache. We do this under the same lock to avoid redundant lookups.
     {
-        const std::lock_guard<std::mutex> lock(mMutex);
+        const std::unique_lock<std::shared_mutex> lock(mMutex);
 
         // Check if another thread loaded this resource while we were processing
         auto existingIt = mResourceCache.find(identifier);
@@ -245,7 +245,7 @@ std::shared_ptr<IResource> ResourceManager::LoadResource(uint64_t crc, bool load
 
 const std::variant<ResourceManager::ResourceLoadError, std::shared_ptr<IResource>>*
 ResourceManager::CheckCache(const ResourceIdentifier& identifier) {
-    const std::lock_guard<std::mutex> lock(mMutex);
+    const std::shared_lock<std::shared_mutex> lock(mMutex);
 
     auto cacheFind = mResourceCache.find(identifier);
     if (cacheFind == mResourceCache.end()) {
@@ -389,7 +389,7 @@ size_t ResourceManager::UnloadResource(const ResourceIdentifier& identifier) {
     size_t ret = 0;
     // We can only erase the resource if we have any resources for that owner.
     if (mResourceCache.contains(identifier)) {
-        const std::lock_guard<std::mutex> lock(mMutex);
+        const std::unique_lock<std::shared_mutex> lock(mMutex);
         mResourceCache.erase(identifier);
     }
 
@@ -424,8 +424,9 @@ bool ResourceManager::WriteResource(const ResourceIdentifier& identifier, const 
 }
 
 bool ResourceManager::OtrSignatureCheck(const char* fileName) {
-    static const char* sOtrSignature = "__OTR__";
-    return strncmp(fileName, sOtrSignature, strlen(sOtrSignature)) == 0;
+    static constexpr char sOtrSignature[] = "__OTR__";
+    static constexpr size_t sOtrSignatureLen = sizeof(sOtrSignature) - 1;
+    return strncmp(fileName, sOtrSignature, sOtrSignatureLen) == 0;
 }
 
 bool ResourceManager::IsAltAssetsEnabled() {

@@ -6,6 +6,7 @@
 #include <list>
 #include <vector>
 #include <mutex>
+#include <shared_mutex>
 #include <queue>
 #include <variant>
 #include "ship/resource/Resource.h"
@@ -136,7 +137,7 @@ class ResourceManager {
     std::shared_ptr<ResourceLoader> mResourceLoader;
     std::shared_ptr<ArchiveManager> mArchiveManager;
     std::shared_ptr<BS::thread_pool> mThreadPool;
-    std::mutex mMutex;
+    std::shared_mutex mMutex;
     bool mAltAssetsEnabled = false;
     // Private information for which owner and archive are default.
     uintptr_t mDefaultCacheOwner = 0;

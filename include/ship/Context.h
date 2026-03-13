@@ -29,7 +29,7 @@ class FileDropMgr;
 
 class Context {
   public:
-    static std::shared_ptr<Context> GetInstance();
+    static const std::shared_ptr<Context>& GetInstance();
     static std::shared_ptr<Context> CreateInstance(const std::string name, const std::string shortName,
                                                    const std::string configFilePath,
                                                    const std::vector<std::string>& archivePaths = {},
@@ -87,6 +87,7 @@ class Context {
 
   private:
     static std::weak_ptr<Context> mContext;
+    static std::shared_ptr<Context> mStrongContext;
 
     std::shared_ptr<spdlog::logger> mLogger;
     std::shared_ptr<Config> mConfig;

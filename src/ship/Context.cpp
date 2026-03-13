@@ -25,9 +25,10 @@
 
 namespace Ship {
 std::weak_ptr<Context> Context::mContext;
+std::shared_ptr<Context> Context::mStrongContext;
 
-std::shared_ptr<Context> Context::GetInstance() {
-    return mContext.lock();
+const std::shared_ptr<Context>& Context::GetInstance() {
+    return mStrongContext;
 }
 
 Context::~Context() {
@@ -55,6 +56,7 @@ Context::CreateInstance(const std::string name, const std::string shortName, con
     if (mContext.expired()) {
         auto shared = std::make_shared<Context>(name, shortName, configFilePath);
         mContext = shared;
+        mStrongContext = shared;
         if (shared->Init(archivePaths, validHashes, reservedThreadCount, audioSettings, window, controlDeck)) {
             return shared;
         } else {
@@ -73,6 +75,7 @@ std::shared_ptr<Context> Context::CreateUninitializedInstance(const std::string 
     if (mContext.expired()) {
         auto shared = std::make_shared<Context>(name, shortName, configFilePath);
         mContext = shared;
+        mStrongContext = shared;
         return shared;
     }
 
