@@ -105,6 +105,13 @@ class GfxRenderingAPIOGL final : public GfxRenderingAPI {
     void SetUniforms(ShaderProgram* prg) const;
     std::string BuildFsShader(const CCFeatures& cc_features);
     void SetPerDrawUniforms();
+    GLuint TryLoadShaderBinary(uint64_t shaderId0, uint32_t shaderId1, size_t& outNumFloats);
+    void SaveShaderBinary(uint64_t shaderId0, uint32_t shaderId1, GLuint program, size_t numFloats);
+
+    bool mShaderBinaryCacheEnabled = false;
+    GLenum mShaderBinaryFormat = GL_NONE;
+    std::string mShaderCachePath;
+    uint64_t mDriverFingerprint = 0;
 
     std::vector<TextureInfo> textures;
     GLuint mCurrentTextureIds[SHADER_MAX_TEXTURES];

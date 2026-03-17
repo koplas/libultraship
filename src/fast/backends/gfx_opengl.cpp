@@ -7,6 +7,8 @@
 
 #include <map>
 #include <unordered_map>
+#include <filesystem>
+#include <fstream>
 
 #ifndef _LANGUAGE_C
 #define _LANGUAGE_C
@@ -380,47 +382,136 @@ static std::string BuildVsShader(const CCFeatures& cc_features) {
     return result;
 }
 
+static std::string ShaderCacheFilePath(const std::string& dir, uint64_t id0, uint32_t id1) {
+    char name[48];
+    snprintf(name, sizeof(name), "%016llx_%08x.bin", (unsigned long long)id0, (unsigned int)id1);
+    return dir + name;
+}
+
+GLuint GfxRenderingAPIOGL::TryLoadShaderBinary(uint64_t shaderId0, uint32_t shaderId1, size_t& outNumFloats) {
+    std::ifstream f(ShaderCacheFilePath(mShaderCachePath, shaderId0, shaderId1), std::ios::binary);
+    if (!f)
+        return GL_NONE;
+
+    uint64_t fp;
+    GLenum fmt;
+    uint32_t nf;
+    GLsizei blen;
+    f.read(reinterpret_cast<char*>(&fp), sizeof(fp));
+    f.read(reinterpret_cast<char*>(&fmt), sizeof(fmt));
+    f.read(reinterpret_cast<char*>(&nf), sizeof(nf));
+    f.read(reinterpret_cast<char*>(&blen), sizeof(blen));
+    if (!f || fp != mDriverFingerprint || fmt != mShaderBinaryFormat || blen <= 0)
+        return GL_NONE;
+
+    std::vector<uint8_t> binary(blen);
+    f.read(reinterpret_cast<char*>(binary.data()), blen);
+    if (!f)
+        return GL_NONE;
+
+    GLuint program = glCreateProgram();
+    glProgramBinary(program, fmt, binary.data(), blen);
+
+    GLint success = GL_FALSE;
+    glGetProgramiv(program, GL_LINK_STATUS, &success);
+    if (!success) {
+        glDeleteProgram(program);
+        return GL_NONE;
+    }
+
+    outNumFloats = nf;
+    return program;
+}
+
+void GfxRenderingAPIOGL::SaveShaderBinary(uint64_t shaderId0, uint32_t shaderId1, GLuint program, size_t numFloats_) {
+    GLint blen = 0;
+    glGetProgramiv(program, GL_PROGRAM_BINARY_LENGTH, &blen);
+    if (blen <= 0)
+        return;
+
+    std::vector<uint8_t> binary(blen);
+    GLenum fmt;
+    glGetProgramBinary(program, blen, nullptr, &fmt, binary.data());
+
+    std::ofstream f(ShaderCacheFilePath(mShaderCachePath, shaderId0, shaderId1), std::ios::binary | std::ios::trunc);
+    if (!f)
+        return;
+
+    uint32_t nf = static_cast<uint32_t>(numFloats_);
+    GLsizei bl = blen;
+    f.write(reinterpret_cast<const char*>(&mDriverFingerprint), sizeof(mDriverFingerprint));
+    f.write(reinterpret_cast<const char*>(&fmt), sizeof(fmt));
+    f.write(reinterpret_cast<const char*>(&nf), sizeof(nf));
+    f.write(reinterpret_cast<const char*>(&bl), sizeof(bl));
+    f.write(reinterpret_cast<const char*>(binary.data()), blen);
+}
+
 ShaderProgram* GfxRenderingAPIOGL::CreateAndLoadNewShader(uint64_t shader_id0, uint32_t shader_id1) {
     CCFeatures cc_features;
     gfx_cc_get_features(shader_id0, shader_id1, &cc_features);
-    const auto fs_buf = BuildFsShader(cc_features);
-    const auto vs_buf = BuildVsShader(cc_features);
-    const GLchar* sources[2] = { vs_buf.data(), fs_buf.data() };
-    const GLint lengths[2] = { (GLint)vs_buf.size(), (GLint)fs_buf.size() };
-    GLint success;
 
-    GLuint vertex_shader = glCreateShader(GL_VERTEX_SHADER);
-    glShaderSource(vertex_shader, 1, &sources[0], &lengths[0]);
-    glCompileShader(vertex_shader);
-    glGetShaderiv(vertex_shader, GL_COMPILE_STATUS, &success);
-    if (!success) {
-        GLint max_length = 0;
-        glGetShaderiv(vertex_shader, GL_INFO_LOG_LENGTH, &max_length);
-        char error_log[1024];
-        // fprintf(stderr, "Vertex shader compilation failed\n");
-        glGetShaderInfoLog(vertex_shader, max_length, &max_length, &error_log[0]);
-        // fprintf(stderr, "%s\n", &error_log[0]);
-        abort();
+    GLuint shader_program = GL_NONE;
+
+#ifndef USE_OPENGLES
+    // Try to restore a previously compiled program from the disk cache.
+    if (mShaderBinaryCacheEnabled) {
+        size_t cachedNumFloats = 0;
+        shader_program = TryLoadShaderBinary(shader_id0, shader_id1, cachedNumFloats);
+        if (shader_program != GL_NONE) {
+            numFloats = cachedNumFloats;
+        }
     }
+#endif
 
-    GLuint fragment_shader = glCreateShader(GL_FRAGMENT_SHADER);
-    glShaderSource(fragment_shader, 1, &sources[1], &lengths[1]);
-    glCompileShader(fragment_shader);
-    glGetShaderiv(fragment_shader, GL_COMPILE_STATUS, &success);
-    if (!success) {
-        GLint max_length = 0;
-        glGetShaderiv(fragment_shader, GL_INFO_LOG_LENGTH, &max_length);
-        char error_log[1024];
-        fprintf(stderr, "Fragment shader compilation failed\n");
-        glGetShaderInfoLog(fragment_shader, max_length, &max_length, &error_log[0]);
-        fprintf(stderr, "%s\n", &error_log[0]);
-        abort();
+    if (shader_program == GL_NONE) {
+        // No cache hit — compile from source.
+        const auto fs_buf = BuildFsShader(cc_features);
+        const auto vs_buf = BuildVsShader(cc_features); // also sets numFloats
+        const GLchar* sources[2] = { vs_buf.data(), fs_buf.data() };
+        const GLint lengths[2] = { (GLint)vs_buf.size(), (GLint)fs_buf.size() };
+        GLint success;
+
+        GLuint vertex_shader = glCreateShader(GL_VERTEX_SHADER);
+        glShaderSource(vertex_shader, 1, &sources[0], &lengths[0]);
+        glCompileShader(vertex_shader);
+        glGetShaderiv(vertex_shader, GL_COMPILE_STATUS, &success);
+        if (!success) {
+            GLint max_length = 0;
+            glGetShaderiv(vertex_shader, GL_INFO_LOG_LENGTH, &max_length);
+            char error_log[1024];
+            // fprintf(stderr, "Vertex shader compilation failed\n");
+            glGetShaderInfoLog(vertex_shader, max_length, &max_length, &error_log[0]);
+            // fprintf(stderr, "%s\n", &error_log[0]);
+            abort();
+        }
+
+        GLuint fragment_shader = glCreateShader(GL_FRAGMENT_SHADER);
+        glShaderSource(fragment_shader, 1, &sources[1], &lengths[1]);
+        glCompileShader(fragment_shader);
+        glGetShaderiv(fragment_shader, GL_COMPILE_STATUS, &success);
+        if (!success) {
+            GLint max_length = 0;
+            glGetShaderiv(fragment_shader, GL_INFO_LOG_LENGTH, &max_length);
+            char error_log[1024];
+            fprintf(stderr, "Fragment shader compilation failed\n");
+            glGetShaderInfoLog(fragment_shader, max_length, &max_length, &error_log[0]);
+            fprintf(stderr, "%s\n", &error_log[0]);
+            abort();
+        }
+
+        shader_program = glCreateProgram();
+        glAttachShader(shader_program, vertex_shader);
+        glAttachShader(shader_program, fragment_shader);
+        glLinkProgram(shader_program);
+        glDeleteShader(vertex_shader);
+        glDeleteShader(fragment_shader);
+
+#ifndef USE_OPENGLES
+        if (mShaderBinaryCacheEnabled) {
+            SaveShaderBinary(shader_id0, shader_id1, shader_program, numFloats);
+        }
+#endif
     }
-
-    GLuint shader_program = glCreateProgram();
-    glAttachShader(shader_program, vertex_shader);
-    glAttachShader(shader_program, fragment_shader);
-    glLinkProgram(shader_program);
 
     size_t cnt = 0;
 
@@ -707,6 +798,32 @@ void GfxRenderingAPIOGL::Init() {
     mPixelDepthRbSize = 1;
 
     glGetIntegerv(GL_MAX_SAMPLES, &mMaxMsaaLevel);
+
+#ifndef USE_OPENGLES
+    // Initialise shader binary cache. Requires at least one supported binary format.
+    GLint numBinaryFormats = 0;
+    glGetIntegerv(GL_NUM_PROGRAM_BINARY_FORMATS, &numBinaryFormats);
+    if (numBinaryFormats > 0) {
+        glGetIntegerv(GL_PROGRAM_BINARY_FORMATS, reinterpret_cast<GLint*>(&mShaderBinaryFormat));
+
+        mShaderCachePath = Ship::Context::GetPathRelativeToAppDirectory("cache/shaders/");
+        std::filesystem::create_directories(mShaderCachePath);
+
+        // Fingerprint the driver so cached binaries are discarded after a driver update.
+        std::string fingerprint;
+        fingerprint += reinterpret_cast<const char*>(glGetString(GL_RENDERER));
+        fingerprint += '\0';
+        fingerprint += reinterpret_cast<const char*>(glGetString(GL_VERSION));
+        mDriverFingerprint = 14695981039346656037ULL; // FNV-1a offset basis
+        for (unsigned char c : fingerprint) {
+            mDriverFingerprint ^= c;
+            mDriverFingerprint *= 1099511628211ULL; // FNV-1a prime
+        }
+
+        mShaderBinaryCacheEnabled = true;
+        SPDLOG_INFO("Shader binary cache enabled at {}", mShaderCachePath);
+    }
+#endif
 }
 
 void GfxRenderingAPIOGL::OnResize() {
