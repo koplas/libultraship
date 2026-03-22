@@ -505,23 +505,35 @@ void Interpreter::ImportTextureRgba16(int tile, bool importReplacement) {
         fullImageLineSizeBytes = width * 2;
     }
 
-    uint32_t i = 0;
-
-    for (uint32_t y = 0; y < height; y++) {
-        for (uint32_t x = 0; x < width; x++) {
-            uint32_t clrIdx = (y * (fullImageLineSizeBytes / 2)) + (x);
-
-            uint16_t col16 = (addr[2 * clrIdx] << 8) | addr[2 * clrIdx + 1];
-            uint8_t a = col16 & 1;
+    if (fullImageLineSizeBytes == width * 2) {
+        // Common case: source stride matches tile width — flat sequential loop, vectorization-friendly.
+        uint32_t numPixels = width * height;
+        for (uint32_t i = 0; i < numPixels; i++) {
+            uint16_t col16 = ((uint16_t)addr[2 * i] << 8) | addr[2 * i + 1];
             uint8_t r = col16 >> 11;
             uint8_t g = (col16 >> 6) & 0x1f;
             uint8_t b = (col16 >> 1) & 0x1f;
             mTexUploadBuffer[4 * i + 0] = SCALE_5_8(r);
             mTexUploadBuffer[4 * i + 1] = SCALE_5_8(g);
             mTexUploadBuffer[4 * i + 2] = SCALE_5_8(b);
-            mTexUploadBuffer[4 * i + 3] = a ? 255 : 0;
-
-            i++;
+            mTexUploadBuffer[4 * i + 3] = (uint8_t)(0u - (col16 & 1u));
+        }
+    } else {
+        // Strided source (sub-image): keep nested loop, output is still sequential.
+        uint32_t i = 0;
+        for (uint32_t y = 0; y < height; y++) {
+            for (uint32_t x = 0; x < width; x++) {
+                uint32_t clrIdx = (y * (fullImageLineSizeBytes / 2)) + x;
+                uint16_t col16 = ((uint16_t)addr[2 * clrIdx] << 8) | addr[2 * clrIdx + 1];
+                uint8_t r = col16 >> 11;
+                uint8_t g = (col16 >> 6) & 0x1f;
+                uint8_t b = (col16 >> 1) & 0x1f;
+                mTexUploadBuffer[4 * i + 0] = SCALE_5_8(r);
+                mTexUploadBuffer[4 * i + 1] = SCALE_5_8(g);
+                mTexUploadBuffer[4 * i + 2] = SCALE_5_8(b);
+                mTexUploadBuffer[4 * i + 3] = (uint8_t)(0u - (col16 & 1u));
+                i++;
+            }
         }
     }
 
@@ -569,18 +581,29 @@ void Interpreter::ImportTextureIA4(int tile, bool importReplacement) {
     uint32_t lineSizeBytes = mRdp->loaded_texture[mRdp->texture_tile[tile].tmem_index].line_size_bytes;
     SUPPORT_CHECK(fullImageLineSizeBytes == lineSizeBytes);
 
-    for (uint32_t i = 0; i < sizeBytes * 2; i++) {
-        uint8_t byte = addr[i / 2];
-        uint8_t part = (byte >> (4 - (i % 2) * 4)) & 0xf;
-        uint8_t intensity = part >> 1;
-        uint8_t alpha = part & 1;
-        uint8_t r = intensity;
-        uint8_t g = intensity;
-        uint8_t b = intensity;
-        mTexUploadBuffer[4 * i + 0] = SCALE_3_8(r);
-        mTexUploadBuffer[4 * i + 1] = SCALE_3_8(g);
-        mTexUploadBuffer[4 * i + 2] = SCALE_3_8(b);
-        mTexUploadBuffer[4 * i + 3] = alpha ? 255 : 0;
+    // Process 1 input byte → 2 output pixels.
+    // Eliminates i/2 and i%2 on the induction variable, enabling autovectorization.
+    uint8_t* out = mTexUploadBuffer;
+    for (uint32_t i = 0; i < sizeBytes; i++) {
+        uint8_t byte = addr[i];
+
+        uint8_t hi = (byte >> 4) & 0xf;
+        uint8_t hiIntensity = SCALE_3_8(hi >> 1);
+        uint8_t hiAlpha = (uint8_t)(0u - (hi & 1u));
+        out[0] = hiIntensity;
+        out[1] = hiIntensity;
+        out[2] = hiIntensity;
+        out[3] = hiAlpha;
+
+        uint8_t lo = byte & 0xf;
+        uint8_t loIntensity = SCALE_3_8(lo >> 1);
+        uint8_t loAlpha = (uint8_t)(0u - (lo & 1u));
+        out[4] = loIntensity;
+        out[5] = loIntensity;
+        out[6] = loIntensity;
+        out[7] = loAlpha;
+
+        out += 8;
     }
 
     uint32_t width = mRdp->texture_tile[tile].line_size_bytes * 2;
@@ -608,15 +631,12 @@ void Interpreter::ImportTextureIA8(int tile, bool importReplacement) {
     SUPPORT_CHECK(fullImageLineSizeBytes == lineSizeBytes);
 
     for (uint32_t i = 0; i < sizeBytes; i++) {
-        uint8_t intensity = addr[i] >> 4;
-        uint8_t alpha = addr[i] & 0xf;
-        uint8_t r = intensity;
-        uint8_t g = intensity;
-        uint8_t b = intensity;
-        mTexUploadBuffer[4 * i + 0] = SCALE_4_8(r);
-        mTexUploadBuffer[4 * i + 1] = SCALE_4_8(g);
-        mTexUploadBuffer[4 * i + 2] = SCALE_4_8(b);
-        mTexUploadBuffer[4 * i + 3] = SCALE_4_8(alpha);
+        uint8_t intensity = SCALE_4_8(addr[i] >> 4);
+        uint8_t alpha = SCALE_4_8(addr[i] & 0xf);
+        mTexUploadBuffer[4 * i + 0] = intensity;
+        mTexUploadBuffer[4 * i + 1] = intensity;
+        mTexUploadBuffer[4 * i + 2] = intensity;
+        mTexUploadBuffer[4 * i + 3] = alpha;
     }
 
     uint32_t width = mRdp->texture_tile[tile].line_size_bytes;
@@ -650,23 +670,31 @@ void Interpreter::ImportTextureIA16(int tile, bool importReplacement) {
         full_image_line_size_bytes = width * 2;
     }
 
-    uint32_t i = 0;
-
-    for (uint32_t y = 0; y < height; y++) {
-        for (uint32_t x = 0; x < width; x++) {
-            uint32_t clrIdx = (y * (full_image_line_size_bytes / 2)) + (x);
-
-            uint8_t intensity = addr[2 * clrIdx];
-            uint8_t alpha = addr[2 * clrIdx + 1];
-            uint8_t r = intensity;
-            uint8_t g = intensity;
-            uint8_t b = intensity;
-            mTexUploadBuffer[4 * i + 0] = r;
-            mTexUploadBuffer[4 * i + 1] = g;
-            mTexUploadBuffer[4 * i + 2] = b;
+    if (full_image_line_size_bytes == width * 2) {
+        // Common case: source stride matches tile width — flat sequential loop, vectorization-friendly.
+        uint32_t numPixels = width * height;
+        for (uint32_t i = 0; i < numPixels; i++) {
+            uint8_t intensity = addr[2 * i];
+            uint8_t alpha = addr[2 * i + 1];
+            mTexUploadBuffer[4 * i + 0] = intensity;
+            mTexUploadBuffer[4 * i + 1] = intensity;
+            mTexUploadBuffer[4 * i + 2] = intensity;
             mTexUploadBuffer[4 * i + 3] = alpha;
-
-            i++;
+        }
+    } else {
+        // Strided source (sub-image): keep nested loop, output is still sequential.
+        uint32_t i = 0;
+        for (uint32_t y = 0; y < height; y++) {
+            for (uint32_t x = 0; x < width; x++) {
+                uint32_t clrIdx = (y * (full_image_line_size_bytes / 2)) + x;
+                uint8_t intensity = addr[2 * clrIdx];
+                uint8_t alpha = addr[2 * clrIdx + 1];
+                mTexUploadBuffer[4 * i + 0] = intensity;
+                mTexUploadBuffer[4 * i + 1] = intensity;
+                mTexUploadBuffer[4 * i + 2] = intensity;
+                mTexUploadBuffer[4 * i + 3] = alpha;
+                i++;
+            }
         }
     }
 
@@ -698,25 +726,32 @@ void Interpreter::ImportTextureI4(int tile, bool importReplacement) {
         fullImageLineSizeBytes = width / 2;
     }
 
-    uint32_t i = 0;
-
-    for (uint32_t y = 0; y < height; y++) {
-        for (uint32_t x = 0; x < width; x++) {
-            uint32_t clrIdx = (y * (fullImageLineSizeBytes * 2)) + (x);
-
-            uint8_t byte = addr[clrIdx / 2];
-            uint8_t part = (byte >> (4 - (clrIdx % 2) * 4)) & 0xf;
-            uint8_t intensity = part;
-            uint8_t r = intensity;
-            uint8_t g = intensity;
-            uint8_t b = intensity;
-            uint8_t a = intensity;
-            mTexUploadBuffer[4 * i + 0] = SCALE_4_8(r);
-            mTexUploadBuffer[4 * i + 1] = SCALE_4_8(g);
-            mTexUploadBuffer[4 * i + 2] = SCALE_4_8(b);
-            mTexUploadBuffer[4 * i + 3] = SCALE_4_8(a);
-
-            i++;
+    if (fullImageLineSizeBytes == lineSizeBytes) {
+        // Common case: source is contiguous — process 1 byte → 2 pixels.
+        // Eliminates clrIdx/2 and clrIdx%2 on the induction variable, enabling autovectorization.
+        uint8_t* out = mTexUploadBuffer;
+        for (uint32_t i = 0; i < sizeBytes; i++) {
+            uint8_t byte = addr[i];
+            uint8_t hi = SCALE_4_8((byte >> 4) & 0xf);
+            uint8_t lo = SCALE_4_8(byte & 0xf);
+            out[0] = hi; out[1] = hi; out[2] = hi; out[3] = hi;
+            out[4] = lo; out[5] = lo; out[6] = lo; out[7] = lo;
+            out += 8;
+        }
+    } else {
+        // Strided source: keep nested loop with clrIdx arithmetic.
+        uint32_t i = 0;
+        for (uint32_t y = 0; y < height; y++) {
+            for (uint32_t x = 0; x < width; x++) {
+                uint32_t clrIdx = (y * (fullImageLineSizeBytes * 2)) + x;
+                uint8_t byte = addr[clrIdx / 2];
+                uint8_t v = SCALE_4_8((byte >> (4 - (clrIdx % 2) * 4)) & 0xf);
+                mTexUploadBuffer[4 * i + 0] = v;
+                mTexUploadBuffer[4 * i + 1] = v;
+                mTexUploadBuffer[4 * i + 2] = v;
+                mTexUploadBuffer[4 * i + 3] = v;
+                i++;
+            }
         }
     }
 
@@ -781,18 +816,27 @@ void Interpreter::ImportTextureCi4(int tile, bool importReplacement) {
 
     SUPPORT_CHECK(fullImageLineSizeBytes == lineSizeBytes);
 
-    for (uint32_t i = 0; i < sizeBytes * 2; i++) {
-        uint8_t byte = addr[i / 2];
-        uint8_t idx = (byte >> (4 - (i % 2) * 4)) & 0xf;
-        uint16_t col16 = (palette[idx * 2] << 8) | palette[idx * 2 + 1]; // Big endian load
-        uint8_t a = col16 & 1;
-        uint8_t r = col16 >> 11;
-        uint8_t g = (col16 >> 6) & 0x1f;
-        uint8_t b = (col16 >> 1) & 0x1f;
-        mTexUploadBuffer[4 * i + 0] = SCALE_5_8(r);
-        mTexUploadBuffer[4 * i + 1] = SCALE_5_8(g);
-        mTexUploadBuffer[4 * i + 2] = SCALE_5_8(b);
-        mTexUploadBuffer[4 * i + 3] = a ? 255 : 0;
+    // Process 1 input byte → 2 output pixels.
+    // Eliminates i/2 and i%2 on the induction variable.
+    uint8_t* out = mTexUploadBuffer;
+    for (uint32_t i = 0; i < sizeBytes; i++) {
+        uint8_t byte = addr[i];
+
+        uint8_t idx0 = (byte >> 4) & 0xf;
+        uint16_t col0 = ((uint16_t)palette[idx0 * 2] << 8) | palette[idx0 * 2 + 1]; // Big endian load
+        out[0] = SCALE_5_8(col0 >> 11);
+        out[1] = SCALE_5_8((col0 >> 6) & 0x1f);
+        out[2] = SCALE_5_8((col0 >> 1) & 0x1f);
+        out[3] = (uint8_t)(0u - (col0 & 1u));
+
+        uint8_t idx1 = byte & 0xf;
+        uint16_t col1 = ((uint16_t)palette[idx1 * 2] << 8) | palette[idx1 * 2 + 1]; // Big endian load
+        out[4] = SCALE_5_8(col1 >> 11);
+        out[5] = SCALE_5_8((col1 >> 6) & 0x1f);
+        out[6] = SCALE_5_8((col1 >> 1) & 0x1f);
+        out[7] = (uint8_t)(0u - (col1 & 1u));
+
+        out += 8;
     }
 
     uint32_t resultLineSizeBytes = mRdp->texture_tile[tile].line_size_bytes;
@@ -828,14 +872,10 @@ void Interpreter::ImportTextureCi8(int tile, bool importReplacement) {
             uint8_t idx = addr[j];
             uint16_t col16 = (mRdp->palettes[idx / 128][(idx % 128) * 2] << 8) |
                              mRdp->palettes[idx / 128][(idx % 128) * 2 + 1]; // Big endian load
-            uint8_t a = col16 & 1;
-            uint8_t r = col16 >> 11;
-            uint8_t g = (col16 >> 6) & 0x1f;
-            uint8_t b = (col16 >> 1) & 0x1f;
-            mTexUploadBuffer[4 * i + 0] = SCALE_5_8(r);
-            mTexUploadBuffer[4 * i + 1] = SCALE_5_8(g);
-            mTexUploadBuffer[4 * i + 2] = SCALE_5_8(b);
-            mTexUploadBuffer[4 * i + 3] = a ? 255 : 0;
+            mTexUploadBuffer[4 * i + 0] = SCALE_5_8(col16 >> 11);
+            mTexUploadBuffer[4 * i + 1] = SCALE_5_8((col16 >> 6) & 0x1f);
+            mTexUploadBuffer[4 * i + 2] = SCALE_5_8((col16 >> 1) & 0x1f);
+            mTexUploadBuffer[4 * i + 3] = (uint8_t)(0u - (col16 & 1u));
         }
     }
 
