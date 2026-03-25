@@ -49,24 +49,27 @@ if (NOT ${spdlog_FOUND})
     FetchContent_MakeAvailable(spdlog)
 endif()
 
-#=================== libzip ===================
-find_package(libzip QUIET)
-if (NOT ${libzip_FOUND})
+#=================== minizip-ng ===================
+find_package(minizip-ng CONFIG QUIET)
+if (NOT minizip-ng_FOUND)
     set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
-    set(BUILD_TOOLS OFF)
-    set(BUILD_REGRESS OFF)
-    set(BUILD_EXAMPLES OFF)
-    set(BUILD_DOC OFF)
-    set(BUILD_OSSFUZZ OFF)
+    set(MZ_COMPAT OFF)
+    set(MZ_BZIP2 OFF)
+    set(MZ_LZMA OFF)
+    set(MZ_ZSTD OFF)
+    set(MZ_PKCRYPT OFF)
+    set(MZ_WZAES OFF)
+    set(MZ_OPENSSL OFF)
+    set(MZ_FETCH_LIBS OFF)
     set(BUILD_SHARED_LIBS OFF)
     FetchContent_Declare(
-        libzip
-        GIT_REPOSITORY https://github.com/nih-at/libzip.git
-        GIT_TAG v1.11.4
+        minizip-ng
+        GIT_REPOSITORY https://github.com/zlib-ng/minizip-ng.git
+        GIT_TAG 4.0.8
         OVERRIDE_FIND_PACKAGE
     )
-    FetchContent_MakeAvailable(libzip)
-    list(APPEND ADDITIONAL_LIB_INCLUDES ${libzip_SOURCE_DIR}/lib ${libzip_BINARY_DIR})
+    FetchContent_MakeAvailable(minizip-ng)
+    list(APPEND ADDITIONAL_LIB_INCLUDES ${minizip-ng_SOURCE_DIR})
 endif()
 
 #=================== Metal-cpp ===================

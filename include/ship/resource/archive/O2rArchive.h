@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <string>
 
-#include "zip.h"
+#include "mz_zip_rw.h"
 
 #include "ship/resource/File.h"
 #include "ship/resource/Resource.h"
@@ -28,6 +28,6 @@ class O2rArchive final : virtual public Archive {
     std::shared_ptr<File> LoadFile(uint64_t hash);
 
   private:
-    zip_t* mZipArchive;
+    void* mZipReader;
 };
 } // namespace Ship

@@ -63,8 +63,8 @@ if (GFX_DEBUG_DISASSEMBLER)
     target_link_libraries(libultraship PRIVATE libgfxd)
 endif()
 
-find_package(libzip REQUIRED)
-target_link_libraries(libultraship PRIVATE libzip::zip)
+find_package(minizip-ng CONFIG REQUIRED)
+target_link_libraries(libultraship PRIVATE MINIZIP::minizip)
 
 find_package(nlohmann_json REQUIRED)
 target_link_libraries(libultraship PUBLIC nlohmann_json::nlohmann_json)
@@ -165,7 +165,7 @@ if (CMAKE_SYSTEM_NAME STREQUAL "iOS")
             )
         endif()
 
-        set_target_properties(zip PROPERTIES
+        set_target_properties(minizip PROPERTIES
             XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY ""
             XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED "NO"
         )

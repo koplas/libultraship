@@ -40,7 +40,7 @@ LUS makes use of the following third party libraries and resources:
 - [prism-processor](https://github.com/KiritoDv/prism-processor/blob/main/LICENSE) (MIT) shader preprocessor
 - [ImGui](https://github.com/ocornut/imgui/blob/master/LICENSE.txt) (MIT)  display UI.
 - [StormLib](https://github.com/ladislav-zezula/StormLib/blob/master/LICENSE) (MIT) create and read `.mpq` compatible archive files.
-- [libzip](https://github.com/nih-at/libzip/blob/main/LICENSE) (BSD-3-Clause) create and read `.zip` compatible archives
+- [minizip-ng](https://github.com/zlib-ng/minizip-ng/blob/master/LICENSE) (zlib) create and read `.zip` compatible archives
 - [StrHash64](https://github.com/Kenix3/libultraship/blob/main/src/ship/utils/StrHash64.cpp) (MIT, zlib, BSD-3-Clause) provide crc64 implementation.
 - [nlohmann-json](https://github.com/nlohmann/json/blob/develop/LICENSE.MIT) (MIT) json parsing and saving.
 - [spdlog](https://github.com/gabime/spdlog/blob/v1.x/LICENSE) (MIT) logging
