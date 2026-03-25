@@ -5,6 +5,8 @@
 #include <string>
 #include <stdint.h>
 #include <string>
+#include <mutex>
+#include <vector>
 
 #include "mz_zip_rw.h"
 
@@ -28,6 +30,15 @@ class O2rArchive final : virtual public Archive {
     std::shared_ptr<File> LoadFile(uint64_t hash);
 
   private:
-    void* mZipReader;
+    bool mIsOpen;
+    mutable std::mutex mReaderPoolMutex;
+    std::vector<void*> mReaderPool;
+
+    // Check out a reader from the pool (creating a new one if the pool is empty).
+    // Returns nullptr if the archive is not open or the file cannot be opened.
+    void* AcquireReader();
+    // Return a reader to the pool. If the archive has already been closed the
+    // reader is destroyed instead.
+    void ReleaseReader(void* reader);
 };
 } // namespace Ship
