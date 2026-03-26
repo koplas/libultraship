@@ -70,6 +70,9 @@ if (NOT minizip-ng_FOUND)
     )
     FetchContent_MakeAvailable(minizip-ng)
     list(APPEND ADDITIONAL_LIB_INCLUDES ${minizip-ng_SOURCE_DIR})
+    if(NOT TARGET MINIZIP::minizip)
+        add_library(MINIZIP::minizip ALIAS minizip)
+    endif()
 endif()
 
 #=================== Metal-cpp ===================
