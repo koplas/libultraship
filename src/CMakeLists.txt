@@ -164,10 +164,12 @@ if (CMAKE_SYSTEM_NAME STREQUAL "iOS")
             )
         endif()
 
-        set_target_properties(minizip PROPERTIES
-            XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY ""
-            XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED "NO"
-        )
+        if(TARGET minizip)
+            set_target_properties(minizip PROPERTIES
+                XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY ""
+                XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED "NO"
+            )
+        endif()
     endif()
 else()
     target_compile_definitions(libultraship PRIVATE
