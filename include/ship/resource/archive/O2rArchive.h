@@ -32,12 +32,12 @@ class O2rArchive final : virtual public Archive {
     bool mIsOpen;
     mutable std::mutex mReaderPoolMutex;
     std::vector<void*> mReaderPool;
-    // Maps entry filename → disk_offset for O(1) entry lookup (populated at Open/WriteFile).
-    std::unordered_map<std::string, int64_t> mDiskOffsets;
+    // Maps entry filename → central directory position for O(1) entry lookup (populated at Open/WriteFile).
+    std::unordered_map<std::string, int64_t> mCdOffsets;
 
     void* AcquireReader();
     void ReleaseReader(void* reader);
-    // Iterate all entries in reader, populating mDiskOffsets and calling IndexFile.
+    // Iterate all entries in reader, populating mCdOffsets and calling IndexFile.
     void BuildIndex(void* reader);
 };
 } // namespace Ship

@@ -67,13 +67,18 @@ void O2rArchive::ReleaseReader(void* reader) {
 // ---------------------------------------------------------------------------
 
 void O2rArchive::BuildIndex(void* reader) {
-    mDiskOffsets.clear();
+    mCdOffsets.clear();
+    void* zip_handle = nullptr;
+    mz_zip_reader_get_zip_handle(reader, &zip_handle);
     int32_t err = mz_zip_reader_goto_first_entry(reader);
     while (err == MZ_OK) {
         if (mz_zip_reader_entry_is_dir(reader) != MZ_OK) {
             mz_zip_file* fileInfo = nullptr;
             if (mz_zip_reader_entry_get_info(reader, &fileInfo) == MZ_OK) {
-                mDiskOffsets[fileInfo->filename] = fileInfo->disk_offset;
+                // mz_zip_get_entry returns the current central-directory position,
+                // which is what mz_zip_goto_entry expects (NOT disk_offset, which
+                // is the local-file-header offset and is a different value entirely).
+                mCdOffsets[fileInfo->filename] = mz_zip_get_entry(zip_handle);
                 IndexFile(fileInfo->filename);
             }
         }
@@ -98,12 +103,20 @@ std::shared_ptr<File> O2rArchive::LoadFile(const std::string& filePath) {
         return nullptr;
     }
 
-    auto it = mDiskOffsets.find(filePath);
-    if (it == mDiskOffsets.end()) {
+    auto it = mCdOffsets.find(filePath);
+    if (it == mCdOffsets.end()) {
         SPDLOG_TRACE("Failed to find file {} in zip archive {}.", filePath, GetPath());
         ReleaseReader(reader);
         return nullptr;
     }
+
+    // mz_zip_reader keeps its own file_info pointer separate from the raw zip handle.
+    // It is set to NULL when goto_next_entry reaches end-of-list (end of BuildIndex) and
+    // also on freshly-created readers. Calling goto_first_entry initialises
+    // reader->file_info = &zip->file_info so that subsequent mz_zip_goto_entry calls
+    // (which update zip->file_info in-place) are visible through the reader API.
+    mz_zip_reader_goto_first_entry(reader);
+
     void* zip_handle = nullptr;
     mz_zip_reader_get_zip_handle(reader, &zip_handle);
     if (mz_zip_goto_entry(zip_handle, it->second) != MZ_OK) {
@@ -291,7 +304,7 @@ bool O2rArchive::WriteFile(const std::string& filePath, const std::vector<uint8_
         return false;
     }
 
-    // Rebuild the full offset index — every disk_offset changes in the rewritten archive.
+    // Rebuild the full offset index — every cd_pos changes in the rewritten archive.
     BuildIndex(newReader);
 
     {
