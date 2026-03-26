@@ -63,6 +63,25 @@ void O2rArchive::ReleaseReader(void* reader) {
 }
 
 // ---------------------------------------------------------------------------
+// Index helpers
+// ---------------------------------------------------------------------------
+
+void O2rArchive::BuildIndex(void* reader) {
+    mDiskOffsets.clear();
+    int32_t err = mz_zip_reader_goto_first_entry(reader);
+    while (err == MZ_OK) {
+        if (mz_zip_reader_entry_is_dir(reader) != MZ_OK) {
+            mz_zip_file* fileInfo = nullptr;
+            if (mz_zip_reader_entry_get_info(reader, &fileInfo) == MZ_OK) {
+                mDiskOffsets[fileInfo->filename] = fileInfo->disk_offset;
+                IndexFile(fileInfo->filename);
+            }
+        }
+        err = mz_zip_reader_goto_next_entry(reader);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
@@ -79,8 +98,16 @@ std::shared_ptr<File> O2rArchive::LoadFile(const std::string& filePath) {
         return nullptr;
     }
 
-    if (mz_zip_reader_locate_entry(reader, filePath.c_str(), 0) != MZ_OK) {
-        SPDLOG_TRACE("Failed to find file {} in zip archive  {}.", filePath, GetPath());
+    auto it = mDiskOffsets.find(filePath);
+    if (it == mDiskOffsets.end()) {
+        SPDLOG_TRACE("Failed to find file {} in zip archive {}.", filePath, GetPath());
+        ReleaseReader(reader);
+        return nullptr;
+    }
+    void* zip_handle = nullptr;
+    mz_zip_reader_get_zip_handle(reader, &zip_handle);
+    if (mz_zip_goto_entry(zip_handle, it->second) != MZ_OK) {
+        SPDLOG_TRACE("Failed to seek to file {} in zip archive {}.", filePath, GetPath());
         ReleaseReader(reader);
         return nullptr;
     }
@@ -154,17 +181,7 @@ bool O2rArchive::Open() {
         }
     }
 
-    err = mz_zip_reader_goto_first_entry(reader);
-    while (err == MZ_OK) {
-        // It is possible for directories to have entries in a zip
-        // file, we don't want those indexed as files in the archive
-        if (mz_zip_reader_entry_is_dir(reader) != MZ_OK) {
-            mz_zip_file* fileInfo = nullptr;
-            mz_zip_reader_entry_get_info(reader, &fileInfo);
-            IndexFile(fileInfo->filename);
-        }
-        err = mz_zip_reader_goto_next_entry(reader);
-    }
+    BuildIndex(reader);
 
     std::lock_guard<std::mutex> lock(mReaderPoolMutex);
     mReaderPool.push_back(reader);
@@ -274,13 +291,15 @@ bool O2rArchive::WriteFile(const std::string& filePath, const std::vector<uint8_
         return false;
     }
 
+    // Rebuild the full offset index — every disk_offset changes in the rewritten archive.
+    BuildIndex(newReader);
+
     {
         std::lock_guard<std::mutex> lock(mReaderPoolMutex);
         mReaderPool.push_back(newReader);
         mIsOpen = true;
     }
 
-    IndexFile(filePath);
     return true;
 }
 

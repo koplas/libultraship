@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include <string>
 #include <mutex>
+#include <unordered_map>
 #include <vector>
 
 #include "ship/resource/File.h"
@@ -31,12 +32,12 @@ class O2rArchive final : virtual public Archive {
     bool mIsOpen;
     mutable std::mutex mReaderPoolMutex;
     std::vector<void*> mReaderPool;
+    // Maps entry filename → disk_offset for O(1) entry lookup (populated at Open/WriteFile).
+    std::unordered_map<std::string, int64_t> mDiskOffsets;
 
-    // Check out a reader from the pool (creating a new one if the pool is empty).
-    // Returns nullptr if the archive is not open or the file cannot be opened.
     void* AcquireReader();
-    // Return a reader to the pool. If the archive has already been closed the
-    // reader is destroyed instead.
     void ReleaseReader(void* reader);
+    // Iterate all entries in reader, populating mDiskOffsets and calling IndexFile.
+    void BuildIndex(void* reader);
 };
 } // namespace Ship
