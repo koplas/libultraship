@@ -8,11 +8,6 @@
 #include <mutex>
 #include <vector>
 
-#include "mz.h"
-#include "mz_zip.h"
-#include "mz_stream.h"
-#include "mz_zip_rw.h"
-
 #include "ship/resource/File.h"
 #include "ship/resource/Resource.h"
 #include "ship/resource/archive/Archive.h"

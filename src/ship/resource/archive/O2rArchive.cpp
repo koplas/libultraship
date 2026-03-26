@@ -1,5 +1,9 @@
 #include "ship/resource/archive/O2rArchive.h"
 
+#include "mz.h"
+#include "mz_zip.h"
+#include "mz_zip_rw.h"
+
 #include "ship/Context.h"
 #include "ship/window/Window.h"
 #include "spdlog/spdlog.h"
