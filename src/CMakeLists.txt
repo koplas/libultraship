@@ -63,7 +63,6 @@ if (GFX_DEBUG_DISASSEMBLER)
     target_link_libraries(libultraship PRIVATE libgfxd)
 endif()
 
-find_package(minizip-ng CONFIG REQUIRED)
 target_link_libraries(libultraship PRIVATE MINIZIP::minizip)
 
 find_package(nlohmann_json REQUIRED)
