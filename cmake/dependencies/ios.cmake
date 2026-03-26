@@ -49,32 +49,6 @@ if (NOT ${spdlog_FOUND})
     FetchContent_MakeAvailable(spdlog)
 endif()
 
-#=================== minizip-ng ===================
-find_package(minizip-ng CONFIG QUIET)
-if (NOT minizip-ng_FOUND)
-    set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
-    set(MZ_COMPAT OFF)
-    set(MZ_BZIP2 OFF)
-    set(MZ_LZMA OFF)
-    set(MZ_ZSTD OFF)
-    set(MZ_PKCRYPT OFF)
-    set(MZ_WZAES OFF)
-    set(MZ_OPENSSL OFF)
-    set(MZ_FETCH_LIBS OFF)
-    set(BUILD_SHARED_LIBS OFF)
-    FetchContent_Declare(
-        minizip-ng
-        GIT_REPOSITORY https://github.com/zlib-ng/minizip-ng.git
-        GIT_TAG 4.0.8
-        OVERRIDE_FIND_PACKAGE
-    )
-    FetchContent_MakeAvailable(minizip-ng)
-    list(APPEND ADDITIONAL_LIB_INCLUDES ${minizip-ng_SOURCE_DIR})
-    if(NOT TARGET MINIZIP::minizip)
-        add_library(MINIZIP::minizip ALIAS minizip)
-    endif()
-endif()
-
 #=================== Metal-cpp ===================
 FetchContent_Declare(
     metalcpp
