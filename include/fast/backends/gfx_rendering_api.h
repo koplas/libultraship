@@ -16,6 +16,16 @@ struct GfxClipParameters {
 
 enum FilteringMode { FILTER_THREE_POINT, FILTER_LINEAR, FILTER_NONE };
 
+// GPU-native compressed texture formats supported for KTX2 texture replacement packs.
+// The preferred format for the active backend is queried via GetPreferredCompressedFormat().
+enum class GfxCompressedTexFormat : uint8_t {
+    None,       // Compressed upload not supported by this backend
+    BC3_UNORM,  // DXT5 – RGBA, desktop OpenGL/D3D11/Metal macOS fallback
+    BC7_UNORM,  // BC7  – high-quality RGBA, desktop OpenGL 4.2+/D3D11/Metal macOS
+    ETC2_RGBA8, // ETC2 – RGBA, OpenGL ES 3.0+ / mobile
+    ASTC_4x4,   // ASTC 4×4 – RGBA, Metal iOS
+};
+
 // A hash function used to hash a: pair<float, float>
 struct hash_pair_ff {
     size_t operator()(const std::pair<float, float>& p) const {
@@ -41,6 +51,13 @@ class GfxRenderingAPI {
     virtual uint32_t NewTexture() = 0;
     virtual void SelectTexture(int tile, uint32_t textureId) = 0;
     virtual void UploadTexture(const uint8_t* rgba32Buf, uint32_t width, uint32_t height) = 0;
+    // Returns the best GPU-native compressed format this backend supports.
+    // Returns GfxCompressedTexFormat::None if compressed upload is not available.
+    virtual GfxCompressedTexFormat GetPreferredCompressedFormat() const { return GfxCompressedTexFormat::None; }
+    // Uploads a block-compressed texture with all mip levels stored consecutively in `data`.
+    // `mipCount` is the number of mip levels (>= 1). Only called when GetPreferredCompressedFormat() != None.
+    virtual void UploadCompressedTexture(const uint8_t* data, uint32_t width, uint32_t height,
+                                         GfxCompressedTexFormat format, uint32_t mipCount = 1) {}
     virtual void SetSamplerParameters(int sampler, bool linear_filter, uint32_t cms, uint32_t cmt) = 0;
     virtual void SetDepthTestAndMask(bool depth_test, bool z_upd) = 0;
     virtual void SetZmodeDecal(bool decal) = 0;

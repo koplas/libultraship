@@ -17,6 +17,9 @@ enum class TextureType {
     GrayscaleAlpha4bpp = 7,
     GrayscaleAlpha8bpp = 8,
     GrayscaleAlpha16bpp = 9,
+    // Raw KTX2 file bytes stored in ImageData; transcoding to a GPU-native
+    // compressed format happens in RegisterBlendedTexture at runtime.
+    KtxRaw = 10,
 };
 
 class Texture final : public Ship::Resource<uint8_t> {

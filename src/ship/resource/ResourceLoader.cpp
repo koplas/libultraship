@@ -1,4 +1,7 @@
 #include "ship/resource/ResourceLoader.h"
+#ifdef INCLUDE_KTX_SUPPORT
+#include <cstring>
+#endif
 #include "ship/resource/ResourceFactory.h"
 #include "ship/resource/ResourceManager.h"
 #include "ship/resource/Resource.h"
@@ -84,6 +87,22 @@ std::shared_ptr<ResourceFactory> ResourceLoader::GetFactory(uint32_t format, std
 
 std::shared_ptr<ResourceInitData> ResourceLoader::ReadResourceInitDataLegacy(const std::string& filePath,
                                                                              std::shared_ptr<File> fileToLoad) {
+#ifdef INCLUDE_KTX_SUPPORT
+    // KTX2 magic: «KTX 20»\r\n\x1a\n (12 bytes)
+    // Type code 0x4B544558 matches Fast::ResourceType::KtxTexture ("KTEX").
+    static constexpr uint8_t KTX2_MAGIC[] = { 0xAB, 0x4B, 0x54, 0x58, 0x20, 0x32, 0x30,
+                                               0xBB, 0x0D, 0x0A, 0x1A, 0x0A };
+    if (fileToLoad->Buffer->size() >= sizeof(KTX2_MAGIC) &&
+        std::memcmp(fileToLoad->Buffer->data(), KTX2_MAGIC, sizeof(KTX2_MAGIC)) == 0) {
+        auto initData = CreateDefaultResourceInitData();
+        initData->Path = filePath;
+        initData->Type = 0x4B544558; // Fast::ResourceType::KtxTexture ("KTEX")
+        initData->ResourceVersion = 0;
+        initData->Format = RESOURCE_FORMAT_BINARY;
+        return initData;
+    }
+#endif
+
     // Determine if file is binary or XML...
     if (fileToLoad->Buffer->at(0) == '<') {
         // File is XML
