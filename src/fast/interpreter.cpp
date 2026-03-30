@@ -3492,7 +3492,7 @@ bool gfx_set_timg_handler_rdp(F3DGfx** cmd0) {
 
     if ((i & 1) != 1) {
         if (gfx_check_image_signature(imgData) == 1) {
-            auto* rm = Ship::Context::GetInstance()->GetResourceManager();
+            auto rm = Ship::Context::GetInstance()->GetResourceManager();
             // Check the cache first so we never block the render thread.
             std::shared_ptr<Fast::Texture> tex =
                 std::static_pointer_cast<Fast::Texture>(rm->GetCachedResource(imgData));
@@ -3535,7 +3535,7 @@ bool gfx_set_timg_otr_hash_handler_custom(F3DGfx** cmd0) {
         return false;
     }
 
-    auto* rm = Ship::Context::GetInstance()->GetResourceManager();
+    auto rm = Ship::Context::GetInstance()->GetResourceManager();
     std::shared_ptr<Fast::Texture> texture =
         std::static_pointer_cast<Fast::Texture>(rm->GetCachedResource(fileName));
     if (texture == nullptr) {
