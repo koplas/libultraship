@@ -59,11 +59,11 @@ ResourceFactoryBinaryTextureV1::ReadResource(std::shared_ptr<Ship::File> file,
 // Preferred GPU-native compressed format, set once from Interpreter::Init().
 static std::atomic<int> s_ktxPreferredFormat{ static_cast<int>(GfxCompressedTexFormat::None) };
 
-void Fast::SetKtxPreferredFormat(GfxCompressedTexFormat fmt) {
+void SetKtxPreferredFormat(GfxCompressedTexFormat fmt) {
     s_ktxPreferredFormat.store(static_cast<int>(fmt), std::memory_order_relaxed);
 }
 
-bool Fast::TranscodeKtxTexture(Fast::Texture* texture, GfxCompressedTexFormat preferred) {
+bool TranscodeKtxTexture(Texture* texture, GfxCompressedTexFormat preferred) {
     ktx_transcode_fmt_e target;
     switch (preferred) {
         case GfxCompressedTexFormat::BC3_UNORM:  target = KTX_TTF_BC3_RGBA;      break;
