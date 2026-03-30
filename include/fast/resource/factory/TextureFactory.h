@@ -17,9 +17,21 @@ class ResourceFactoryBinaryTextureV1 final : public Ship::ResourceFactoryBinary 
 };
 
 #ifdef INCLUDE_KTX_SUPPORT
-// Stores raw KTX2 file bytes as a texture resource. Transcoding to a GPU-native
-// compressed format (BC7/BC3/ETC2/ASTC) happens later in RegisterBlendedTexture
-// or ImportTextureImg, once the active rendering backend is known.
+#include "fast/backends/gfx_rendering_api.h"
+#include "fast/resource/type/Texture.h"
+
+// Transcodes a KTX2 texture in-place to the given GPU-native compressed format.
+// Updates texture->ImageData, CompressedFormat, and CompressedMipCount.
+// Returns true on success.
+bool TranscodeKtxTexture(Texture* texture, GfxCompressedTexFormat preferred);
+
+// Called once from Interpreter::Init() so ReadResource knows the target format.
+void SetKtxPreferredFormat(GfxCompressedTexFormat fmt);
+
+// Reads a KTX2 file and transcodes it immediately on the calling thread (the
+// ResourceManager thread pool) to the GPU-native format registered via
+// SetKtxPreferredFormat. If the format has not been set yet, stores raw KTX2
+// bytes and sets CompressedFormat = None as a fallback.
 class ResourceFactoryKtxTextureV0 final : public Ship::ResourceFactoryBinary {
   public:
     std::shared_ptr<Ship::IResource> ReadResource(std::shared_ptr<Ship::File> file,

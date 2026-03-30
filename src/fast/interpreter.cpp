@@ -28,7 +28,6 @@
 #include "fast/lus_gbi.h"
 #ifdef INCLUDE_KTX_SUPPORT
 #include <ktx.h>
-#include <chrono>
 #endif
 #include "fast/backends/gfx_window_manager_api.h"
 #include "fast/backends/gfx_rendering_api.h"
@@ -859,48 +858,32 @@ void Interpreter::ImportTextureImg(int tile, bool importReplacement) {
 
 #ifdef INCLUDE_KTX_SUPPORT
     const bool isKtxRaw = (metadata->type == Fast::TextureType::KtxRaw);
-    // Always consult mMaskedTextures for KtxRaw resources — they may have been transcoded
-    // either by RegisterBlendedTexture or by the auto-registration path below.
     const bool doLookup = importReplacement || isKtxRaw;
 
     if (doLookup && metadata->resource != nullptr) {
         const std::string basePath = GetBaseTexturePath(metadata->resource->GetInitData()->Path);
 
-        // Auto-register KtxRaw textures that entered via direct archive override,
-        // bypassing RegisterBlendedTexture. Insert first, then submit async transcode.
+        // Auto-register KtxRaw textures that arrived via direct archive override
+        // (bypassing RegisterBlendedTexture). Transcoding already happened on the
+        // resource-loading thread pool in ReadResource; just populate the entry.
         if (isKtxRaw && mMaskedTextures.find(basePath) == mMaskedTextures.end()) {
             auto texRes = std::static_pointer_cast<Fast::Texture>(metadata->resource);
             if (texRes && texRes->ImageData != nullptr) {
-                mMaskedTextures[basePath] = MaskedTextureEntry{ nullptr, nullptr };
-                auto& mapEntry = mMaskedTextures[basePath];
-                auto pool = Ship::Context::GetInstance()->GetResourceManager()->GetThreadPool();
-                mapEntry.transcodeFuture = pool->submit_task([this, texRes, &mapEntry]() {
-                    TranscodeKtxTexture(texRes.get(), mapEntry);
-                }).share();
+                MaskedTextureEntry mapEntry{ nullptr, nullptr };
+                TranscodeKtxTexture(texRes.get(), mapEntry);
+                mMaskedTextures[basePath] = std::move(mapEntry);
             }
         }
 
         const auto it = mMaskedTextures.find(basePath);
-        if (it != mMaskedTextures.end()) {
-            const bool transcoding = it->second.transcodeFuture.valid() &&
-                it->second.transcodeFuture.wait_for(std::chrono::seconds(0)) != std::future_status::ready;
-
-            if (transcoding) {
-                // Transcode is still in progress. For KtxRaw textures there is no
-                // fallback RGBA data, so skip the upload this frame entirely. The
-                // compressed texture will be uploaded on the next frame once ready.
-                if (isKtxRaw)
-                    return;
-                // For replacement-pack overlays, fall through to upload the original
-                // N64 texture as a temporary stand-in.
-            } else if (it->second.compressedFormat != GfxCompressedTexFormat::None
-                    && it->second.replacementData != nullptr) {
-                const MaskedTextureEntry& entry = it->second;
-                mRapi->UploadCompressedTexture(entry.replacementData,
-                                               entry.replacementWidth, entry.replacementHeight,
-                                               entry.compressedFormat, entry.compressedMipCount);
-                return;
-            }
+        if (it != mMaskedTextures.end()
+                && it->second.compressedFormat != GfxCompressedTexFormat::None
+                && it->second.replacementData != nullptr) {
+            const MaskedTextureEntry& entry = it->second;
+            mRapi->UploadCompressedTexture(entry.replacementData,
+                                           entry.replacementWidth, entry.replacementHeight,
+                                           entry.compressedFormat, entry.compressedMipCount);
+            return;
         }
     }
 #endif
@@ -1028,13 +1011,6 @@ void Interpreter::ImportTexture(int i, int tile, bool importReplacement) {
             const auto it = mMaskedTextures.find(
                 GetBaseTexturePath(metadata->resource->GetInitData()->Path));
             if (it != mMaskedTextures.end()) {
-                // While transcoding is in flight replacementData is null; use the
-                // resource object pointer as a stable, unique cache key instead.
-                // Once the future is ready the key switches to replacementData,
-                // causing a cache miss that triggers the compressed upload.
-                if (it->second.transcodeFuture.valid() &&
-                    it->second.transcodeFuture.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
-                    return reinterpret_cast<const uint8_t*>(metadata->resource.get());
                 if (it->second.replacementData != nullptr)
                     return it->second.replacementData;
             }
@@ -4358,6 +4334,11 @@ void Interpreter::Init(class GfxWindowBackend* wapi, class GfxRenderingAPI* rapi
     mWapi->Init(game_name, rapi->GetName(), start_in_fullscreen, width, height, posX, posY);
     mRapi->Init();
     mRapi->UpdateFramebufferParameters(0, width, height, 1, false, true, true, true);
+#ifdef INCLUDE_KTX_SUPPORT
+    // Register the preferred format so ResourceFactoryKtxTextureV0::ReadResource
+    // can transcode KTX2 textures inline on the resource-loading thread pool.
+    Fast::SetKtxPreferredFormat(mRapi->GetPreferredCompressedFormat());
+#endif
     mCurDimensions.internal_mul =
         Ship::Context::GetInstance()->GetConsoleVariables()->GetFloat(CVAR_INTERNAL_RESOLUTION, 1);
     mMsaaLevel = Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger(CVAR_MSAA_VALUE, 1);
@@ -4724,80 +4705,29 @@ int32_t gfx_check_image_signature(const char* imgData) {
 }
 
 #ifdef INCLUDE_KTX_SUPPORT
+// Populates a MaskedTextureEntry from an already-transcoded KtxRaw resource.
+// If the resource hasn't been transcoded yet (renderer was not ready when
+// ReadResource ran), falls back to transcoding synchronously here.
 bool Interpreter::TranscodeKtxTexture(Fast::Texture* texRes, MaskedTextureEntry& entry) {
-    if (mRapi == nullptr) return false;
-    const GfxCompressedTexFormat preferred = mRapi->GetPreferredCompressedFormat();
-    if (preferred == GfxCompressedTexFormat::None) return false;
-
-    ktx_transcode_fmt_e transcodeTarget;
-    switch (preferred) {
-        case GfxCompressedTexFormat::BC3_UNORM:  transcodeTarget = KTX_TTF_BC3_RGBA;      break;
-        case GfxCompressedTexFormat::BC7_UNORM:  transcodeTarget = KTX_TTF_BC7_RGBA;      break;
-        case GfxCompressedTexFormat::ETC2_RGBA8: transcodeTarget = KTX_TTF_ETC2_RGBA;     break;
-        case GfxCompressedTexFormat::ASTC_4x4:   transcodeTarget = KTX_TTF_ASTC_4x4_RGBA; break;
-        default:                                  transcodeTarget = KTX_TTF_RGBA32;         break;
+    if (texRes->CompressedFormat == GfxCompressedTexFormat::None) {
+        // Fallback: transcode now (renderer was not ready at load time).
+        if (mRapi == nullptr) return false;
+        const GfxCompressedTexFormat preferred = mRapi->GetPreferredCompressedFormat();
+        if (!Fast::TranscodeKtxTexture(texRes, preferred))
+            return false;
     }
-
-    ktxTexture2* kTex = nullptr;
-    KTX_error_code result = ktxTexture2_CreateFromMemory(
-        texRes->ImageData, texRes->ImageDataSize, KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT, &kTex);
-    if (result != KTX_SUCCESS) {
-        SPDLOG_ERROR("TranscodeKtxTexture: failed to open KTX2 data for '{}': {}",
-                     texRes->GetInitData()->Path, ktxErrorString(result));
-        return false;
-    }
-
-    if (ktxTexture2_NeedsTranscoding(kTex))
-        result = ktxTexture2_TranscodeBasis(kTex, transcodeTarget, 0);
-
-    if (result == KTX_SUCCESS) {
-        const ktx_uint8_t* baseData = ktxTexture_GetData(ktxTexture(kTex));
-        uint32_t totalSize = 0;
-        for (uint32_t level = 0; level < kTex->numLevels; ++level)
-            totalSize += static_cast<uint32_t>(ktxTexture_GetImageSize(ktxTexture(kTex), level));
-        // Transcoded output can be larger than the raw KTX2 file (e.g. ETC1S → BC7
-        // can expand up to 16×), so always allocate a correctly-sized new buffer
-        // rather than reusing ImageData.
-        uint8_t* transcoded = new uint8_t[totalSize];
-        uint32_t writeOffset = 0;
-        for (uint32_t level = 0; level < kTex->numLevels; ++level) {
-            ktx_size_t levelOffset = 0;
-            ktxTexture_GetImageOffset(ktxTexture(kTex), level, 0, 0, &levelOffset);
-            const ktx_size_t levelSize = ktxTexture_GetImageSize(ktxTexture(kTex), level);
-            std::memcpy(transcoded + writeOffset, baseData + levelOffset, levelSize);
-            writeOffset += static_cast<uint32_t>(levelSize);
-        }
-        delete[] texRes->ImageData;
-        texRes->ImageData = transcoded;
-        texRes->ImageDataSize = totalSize;
-        entry.replacementData = texRes->ImageData;
-        entry.replacementWidth = static_cast<uint16_t>(kTex->baseWidth);
-        entry.replacementHeight = static_cast<uint16_t>(kTex->baseHeight);
-        entry.compressedMipCount = kTex->numLevels;
-        entry.compressedFormat = preferred;
-    } else {
-        SPDLOG_ERROR("TranscodeKtxTexture: transcode failed for '{}': {}",
-                     texRes->GetInitData()->Path, ktxErrorString(result));
-    }
-
-    ktxTexture_Destroy(ktxTexture(kTex));
-    return entry.compressedFormat != GfxCompressedTexFormat::None;
+    entry.replacementData    = texRes->ImageData;
+    entry.replacementWidth   = texRes->Width;
+    entry.replacementHeight  = texRes->Height;
+    entry.compressedFormat   = texRes->CompressedFormat;
+    entry.compressedMipCount = texRes->CompressedMipCount;
+    return true;
 }
 #endif
 
 void Interpreter::RegisterBlendedTexture(const char* name, uint8_t* mask, uint8_t* replacement) {
     if (gfx_check_image_signature(name)) {
         name += 7;
-    }
-
-    // If re-registering an entry whose transcode is still running, wait for it
-    // before overwriting — the async task holds a reference to the old entry.
-    auto existing = mMaskedTextures.find(name);
-    if (existing != mMaskedTextures.end()) {
-#ifdef INCLUDE_KTX_SUPPORT
-        if (existing->second.transcodeFuture.valid())
-            existing->second.transcodeFuture.wait();
-#endif
     }
 
     MaskedTextureEntry entry{ mask, nullptr };
@@ -4809,19 +4739,14 @@ void Interpreter::RegisterBlendedTexture(const char* name, uint8_t* mask, uint8_
 
 #ifdef INCLUDE_KTX_SUPPORT
         if (texRes && texRes->Type == Fast::TextureType::KtxRaw) {
-            // Insert the (empty) entry first so we can take a stable map reference
-            // for the async task. std::map references are not invalidated by other insertions.
+            // Transcoding already happened on the resource-loading thread pool in
+            // ReadResource. TranscodeKtxTexture just populates the entry from the
+            // resource, or transcodes synchronously if the format wasn't set yet.
+            TranscodeKtxTexture(texRes.get(), entry);
             mMaskedTextures[name] = std::move(entry);
-            auto& mapEntry = mMaskedTextures[name];
-            auto pool = Ship::Context::GetInstance()->GetResourceManager()->GetThreadPool();
-            mapEntry.transcodeFuture = pool->submit_task([this, texRes, &mapEntry]() {
-                TranscodeKtxTexture(texRes.get(), mapEntry);
-            }).share();
             return;
         }
 #endif
-        // Fallback: use the decoded pixel data directly (RGBA32 or similar).
-        // Never store raw KTX2 file bytes here — they are not pixels.
         entry.replacementData = texRes ? texRes->ImageData : nullptr;
         if (texRes) {
             entry.replacementWidth  = static_cast<uint16_t>(texRes->Width);
@@ -4838,12 +4763,6 @@ void Interpreter::UnregisterBlendedTexture(const char* name) {
     if (gfx_check_image_signature(name)) {
         name += 7;
     }
-
-#ifdef INCLUDE_KTX_SUPPORT
-    auto it = mMaskedTextures.find(name);
-    if (it != mMaskedTextures.end() && it->second.transcodeFuture.valid())
-        it->second.transcodeFuture.wait();
-#endif
     mMaskedTextures.erase(name);
 }
 

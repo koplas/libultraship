@@ -1,6 +1,9 @@
 #pragma once
 
 #include "ship/resource/Resource.h"
+#ifdef INCLUDE_KTX_SUPPORT
+#include "fast/backends/gfx_rendering_api.h"
+#endif
 
 #define TEX_FLAG_LOAD_AS_RAW (1 << 0)
 #define TEX_FLAG_LOAD_AS_IMG (1 << 1)
@@ -17,8 +20,8 @@ enum class TextureType {
     GrayscaleAlpha4bpp = 7,
     GrayscaleAlpha8bpp = 8,
     GrayscaleAlpha16bpp = 9,
-    // Raw KTX2 file bytes stored in ImageData; transcoding to a GPU-native
-    // compressed format happens in RegisterBlendedTexture at runtime.
+    // KTX2 texture: ImageData holds the transcoded compressed data once
+    // ReadResource has run; CompressedFormat indicates the target format.
     KtxRaw = 10,
 };
 
@@ -38,6 +41,10 @@ class Texture final : public Ship::Resource<uint8_t> {
     float VPixelScale = 1.0;
     uint32_t ImageDataSize;
     uint8_t* ImageData = nullptr;
+#ifdef INCLUDE_KTX_SUPPORT
+    GfxCompressedTexFormat CompressedFormat = GfxCompressedTexFormat::None;
+    uint32_t CompressedMipCount = 1;
+#endif
 
     ~Texture();
 };

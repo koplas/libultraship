@@ -2,7 +2,6 @@
 
 #include <stdbool.h>
 #include <stdint.h>
-#include <future>
 #include <unordered_map>
 #include <map>
 #include <list>
@@ -359,9 +358,6 @@ struct MaskedTextureEntry {
     // All mip levels are stored consecutively in replacementData (level 0 first).
     uint32_t compressedMipCount = 1;
     GfxCompressedTexFormat compressedFormat = GfxCompressedTexFormat::None;
-    // Valid while transcoding is running on the thread pool.
-    // ImportTextureImg waits on this before uploading.
-    std::shared_future<void> transcodeFuture;
 #endif
 };
 
