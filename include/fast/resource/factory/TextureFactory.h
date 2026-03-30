@@ -3,6 +3,11 @@
 #include "ship/resource/Resource.h"
 #include "ship/resource/ResourceFactoryBinary.h"
 
+#ifdef INCLUDE_KTX_SUPPORT
+#include "fast/backends/gfx_rendering_api.h"
+#include "fast/resource/type/Texture.h"
+#endif
+
 namespace Fast {
 class ResourceFactoryBinaryTextureV0 final : public Ship::ResourceFactoryBinary {
   public:
@@ -17,8 +22,6 @@ class ResourceFactoryBinaryTextureV1 final : public Ship::ResourceFactoryBinary 
 };
 
 #ifdef INCLUDE_KTX_SUPPORT
-#include "fast/backends/gfx_rendering_api.h"
-#include "fast/resource/type/Texture.h"
 
 // Transcodes a KTX2 texture in-place to the given GPU-native compressed format.
 // Updates texture->ImageData, CompressedFormat, and CompressedMipCount.
