@@ -28,6 +28,7 @@
 #include "fast/lus_gbi.h"
 #ifdef INCLUDE_KTX_SUPPORT
 #include <ktx.h>
+#include <chrono>
 #endif
 #include "fast/backends/gfx_window_manager_api.h"
 #include "fast/backends/gfx_rendering_api.h"
@@ -881,11 +882,18 @@ void Interpreter::ImportTextureImg(int tile, bool importReplacement) {
 
         const auto it = mMaskedTextures.find(basePath);
         if (it != mMaskedTextures.end()) {
-            // Block until the thread-pool transcode task completes (no-op once done).
-            if (it->second.transcodeFuture.valid())
-                it->second.transcodeFuture.wait();
+            const bool transcoding = it->second.transcodeFuture.valid() &&
+                it->second.transcodeFuture.wait_for(std::chrono::seconds(0)) != std::future_status::ready;
 
-            if (it->second.compressedFormat != GfxCompressedTexFormat::None
+            if (transcoding) {
+                // Transcode is still in progress. For KtxRaw textures there is no
+                // fallback RGBA data, so skip the upload this frame entirely. The
+                // compressed texture will be uploaded on the next frame once ready.
+                if (isKtxRaw)
+                    return;
+                // For replacement-pack overlays, fall through to upload the original
+                // N64 texture as a temporary stand-in.
+            } else if (it->second.compressedFormat != GfxCompressedTexFormat::None
                     && it->second.replacementData != nullptr) {
                 const MaskedTextureEntry& entry = it->second;
                 mRapi->UploadCompressedTexture(entry.replacementData,
@@ -1022,7 +1030,10 @@ void Interpreter::ImportTexture(int i, int tile, bool importReplacement) {
             if (it != mMaskedTextures.end()) {
                 // While transcoding is in flight replacementData is null; use the
                 // resource object pointer as a stable, unique cache key instead.
-                if (it->second.transcodeFuture.valid())
+                // Once the future is ready the key switches to replacementData,
+                // causing a cache miss that triggers the compressed upload.
+                if (it->second.transcodeFuture.valid() &&
+                    it->second.transcodeFuture.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
                     return reinterpret_cast<const uint8_t*>(metadata->resource.get());
                 if (it->second.replacementData != nullptr)
                     return it->second.replacementData;
