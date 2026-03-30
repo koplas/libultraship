@@ -28,6 +28,7 @@
 #include "fast/lus_gbi.h"
 #ifdef INCLUDE_KTX_SUPPORT
 #include <ktx.h>
+#include "fast/resource/factory/TextureFactory.h"
 #endif
 #include "fast/backends/gfx_window_manager_api.h"
 #include "fast/backends/gfx_rendering_api.h"
