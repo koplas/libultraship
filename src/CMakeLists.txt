@@ -106,6 +106,11 @@ if (USE_OPENGLES)
     endif()
 endif()
 
+if(INCLUDE_KTX_SUPPORT)
+    target_link_libraries(libultraship PRIVATE ktx_read)
+    target_compile_definitions(libultraship PRIVATE INCLUDE_KTX_SUPPORT)
+endif()
+
 target_link_libraries(libultraship PUBLIC prism)
 
 #=================== Compile Options & Defs ===================

@@ -2,6 +2,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <future>
 #include <unordered_map>
 #include <map>
 #include <list>
@@ -350,6 +351,18 @@ struct FBInfo {
 struct MaskedTextureEntry {
     uint8_t* mask;
     uint8_t* replacementData;
+    uint16_t replacementWidth = 0;
+    uint16_t replacementHeight = 0;
+#ifdef INCLUDE_KTX_SUPPORT
+    // Set when replacementData holds GPU-native block-compressed data
+    // (transcoded from KTX2). replacementWidth/Height give the base dimensions.
+    // All mip levels are stored consecutively in replacementData (level 0 first).
+    uint32_t compressedMipCount = 1;
+    GfxCompressedTexFormat compressedFormat = GfxCompressedTexFormat::None;
+    // Valid while transcoding is running on the thread pool.
+    // ImportTextureImg waits on this before uploading.
+    std::shared_future<void> transcodeFuture;
+#endif
 };
 
 class Interpreter {
@@ -381,6 +394,12 @@ class Interpreter {
     void GetPixelDepthPrepare(float x, float y);
     uint16_t GetPixelDepth(float x, float y);
     void RegisterBlendedTexture(const char* name, uint8_t* mask, uint8_t* replacement);
+#ifdef INCLUDE_KTX_SUPPORT
+    // Transcodes a KtxRaw texture resource to the preferred GPU-native compressed format
+    // in-place (replaces texRes->ImageData) and populates the relevant MaskedTextureEntry fields.
+    // Returns true on success.
+    bool TranscodeKtxTexture(Fast::Texture* texRes, MaskedTextureEntry& entry);
+#endif
     void UnregisterBlendedTexture(const char* name);
 
     void SetNativeDimensions(float width, float height);

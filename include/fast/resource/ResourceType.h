@@ -9,6 +9,7 @@ enum class ResourceType {
     Light = 0x46669697,       // LGTS
     Matrix = 0x4F4D5458,      // OMTX
     Texture = 0x4F544558,     // OTEX
+    KtxTexture = 0x4B544558,  // KTEX
     Vertex = 0x4F565458,      // OVTX
 };
 } // namespace Fast

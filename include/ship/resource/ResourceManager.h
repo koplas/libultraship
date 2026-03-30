@@ -112,6 +112,8 @@ class ResourceManager {
     size_t GetResourceSize(const char* name);
     size_t GetResourceSize(uint64_t crc);
 
+    std::shared_ptr<BS::thread_pool> GetThreadPool() const { return mThreadPool; }
+
     bool GetResourceIsCustom(std::shared_ptr<IResource> resource);
     bool GetResourceIsCustom(const char* name);
     bool GetResourceIsCustom(uint64_t crc);
