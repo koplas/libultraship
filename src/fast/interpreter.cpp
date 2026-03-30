@@ -3492,10 +3492,15 @@ bool gfx_set_timg_handler_rdp(F3DGfx** cmd0) {
 
     if ((i & 1) != 1) {
         if (gfx_check_image_signature(imgData) == 1) {
-            std::shared_ptr<Fast::Texture> tex = std::static_pointer_cast<Fast::Texture>(
-                Ship::Context::GetInstance()->GetResourceManager()->LoadResourceProcess(imgData));
+            auto* rm = Ship::Context::GetInstance()->GetResourceManager();
+            // Check the cache first so we never block the render thread.
+            std::shared_ptr<Fast::Texture> tex =
+                std::static_pointer_cast<Fast::Texture>(rm->GetCachedResource(imgData));
 
             if (tex == nullptr) {
+                // Not cached yet — kick off an async load on the thread pool and skip
+                // this frame. The resource will be in cache within a frame or two.
+                rm->LoadResourceAsync(imgData);
                 (*cmd0)++;
                 return false;
             }
@@ -3530,9 +3535,15 @@ bool gfx_set_timg_otr_hash_handler_custom(F3DGfx** cmd0) {
         return false;
     }
 
+    auto* rm = Ship::Context::GetInstance()->GetResourceManager();
     std::shared_ptr<Fast::Texture> texture =
-        std::static_pointer_cast<Fast::Texture>(Ship::Context::GetInstance()->GetResourceManager()->LoadResourceProcess(
-            Ship::Context::GetInstance()->GetResourceManager()->GetArchiveManager()->HashToCString(hash)));
+        std::static_pointer_cast<Fast::Texture>(rm->GetCachedResource(fileName));
+    if (texture == nullptr) {
+        // Not cached yet — kick off an async load and skip this frame.
+        rm->LoadResourceAsync(fileName);
+        (*cmd0)++;
+        return false;
+    }
     if (texture != nullptr) {
         texFlags = texture->Flags;
         rawTexMetadata.width = texture->Width;
