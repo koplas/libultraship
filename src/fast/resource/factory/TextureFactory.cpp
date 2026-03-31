@@ -83,8 +83,31 @@ bool TranscodeKtxTexture(Texture* texture, GfxCompressedTexFormat preferred) {
         return false;
     }
 
-    if (ktxTexture2_NeedsTranscoding(kTex))
+    // Determine the actual GPU format: either the transcoding target (for Basis
+    // Universal files) or the native VkFormat already stored in the KTX2 file.
+    GfxCompressedTexFormat actualFormat = preferred;
+    if (ktxTexture2_NeedsTranscoding(kTex)) {
         result = ktxTexture2_TranscodeBasis(kTex, target, 0);
+    } else {
+        // KTX2 file already contains GPU-native compressed blocks.  Map vkFormat
+        // to GfxCompressedTexFormat so the renderer uses the correct decode path.
+        // VkFormat constants (Vulkan spec):
+        //   131 = VK_FORMAT_ETC2_R8G8B8A8_UNORM_BLOCK
+        //   137 = VK_FORMAT_BC3_UNORM_BLOCK
+        //   145 = VK_FORMAT_BC7_UNORM_BLOCK
+        //   157 = VK_FORMAT_ASTC_4x4_UNORM_BLOCK
+        switch (kTex->vkFormat) {
+            case 131: actualFormat = GfxCompressedTexFormat::ETC2_RGBA8; break;
+            case 137: actualFormat = GfxCompressedTexFormat::BC3_UNORM;  break;
+            case 145: actualFormat = GfxCompressedTexFormat::BC7_UNORM;  break;
+            case 157: actualFormat = GfxCompressedTexFormat::ASTC_4x4;   break;
+            default:
+                SPDLOG_WARN("TranscodeKtxTexture: unrecognised native vkFormat {} for '{}', "
+                            "falling back to preferred format",
+                            kTex->vkFormat, texture->GetInitData()->Path);
+                break;
+        }
+    }
 
     if (result == KTX_SUCCESS) {
         const ktx_uint8_t* baseData = ktxTexture_GetData(ktxTexture(kTex));
@@ -105,7 +128,7 @@ bool TranscodeKtxTexture(Texture* texture, GfxCompressedTexFormat preferred) {
         delete[] texture->ImageData;
         texture->ImageData = transcoded;
         texture->ImageDataSize = totalSize;
-        texture->CompressedFormat = preferred;
+        texture->CompressedFormat = actualFormat;
         texture->CompressedMipCount = kTex->numLevels;
     } else {
         SPDLOG_ERROR("TranscodeKtxTexture: transcode failed for '{}': {}", texture->GetInitData()->Path, ktxErrorString(result));
