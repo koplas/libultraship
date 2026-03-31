@@ -867,12 +867,18 @@ void Interpreter::ImportTextureImg(int tile, bool importReplacement) {
         // Auto-register KtxRaw textures that arrived via direct archive override
         // (bypassing RegisterBlendedTexture). Transcoding already happened on the
         // resource-loading thread pool in ReadResource; just populate the entry.
-        if (isKtxRaw && mMaskedTextures.find(basePath) == mMaskedTextures.end()) {
+        // Also refresh a stale entry when the resource was evicted and reloaded:
+        // the ResourceManager creates a new Texture object so ktxResource != texRes.
+        if (isKtxRaw) {
             auto texRes = std::static_pointer_cast<Fast::Texture>(metadata->resource);
             if (texRes && texRes->ImageData != nullptr) {
-                MaskedTextureEntry mapEntry{ nullptr, nullptr };
-                TranscodeKtxTexture(texRes.get(), mapEntry);
-                mMaskedTextures[basePath] = std::move(mapEntry);
+                const auto it = mMaskedTextures.find(basePath);
+                if (it == mMaskedTextures.end() || it->second.ktxResource != texRes) {
+                    MaskedTextureEntry mapEntry{ nullptr, nullptr };
+                    mapEntry.ktxResource = texRes;
+                    TranscodeKtxTexture(texRes.get(), mapEntry);
+                    mMaskedTextures[basePath] = std::move(mapEntry);
+                }
             }
         }
 
@@ -1007,12 +1013,19 @@ void Interpreter::ImportTexture(int i, int tile, bool importReplacement) {
         // For KtxRaw textures, after transcoding replaces ImageData the original
         // raw-bytes pointer stored in loaded_texture.addr is stale. Look up
         // mMaskedTextures regardless of importReplacement to get the stable pointer.
+        // Guard: only use the cached replacementData if it was registered for the
+        // current resource instance. After eviction and reload the ResourceManager
+        // creates a new Texture object (new ImageData), so ktxResource != texRes
+        // signals a stale entry and we fall back to loaded_texture.addr which
+        // always holds the current resource's ImageData (kept alive by raw_tex_metadata).
         const bool isKtxRaw = (metadata->type == Fast::TextureType::KtxRaw);
         if ((importReplacement || isKtxRaw) && metadata->resource != nullptr) {
             const auto it = mMaskedTextures.find(
                 GetBaseTexturePath(metadata->resource->GetInitData()->Path));
-            if (it != mMaskedTextures.end()) {
-                if (it->second.replacementData != nullptr)
+            if (it != mMaskedTextures.end() && it->second.replacementData != nullptr) {
+                if (!isKtxRaw ||
+                    it->second.ktxResource ==
+                        std::static_pointer_cast<Fast::Texture>(metadata->resource))
                     return it->second.replacementData;
             }
         }
@@ -4754,6 +4767,7 @@ void Interpreter::RegisterBlendedTexture(const char* name, uint8_t* mask, uint8_
             // Transcoding already happened on the resource-loading thread pool in
             // ReadResource. TranscodeKtxTexture just populates the entry from the
             // resource, or transcodes synchronously if the format wasn't set yet.
+            entry.ktxResource = texRes;
             TranscodeKtxTexture(texRes.get(), entry);
             mMaskedTextures[name] = std::move(entry);
             return;
