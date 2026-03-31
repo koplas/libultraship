@@ -588,9 +588,8 @@ GfxCompressedTexFormat GfxRenderingAPIDX11::GetPreferredCompressedFormat() const
     return GfxCompressedTexFormat::BC7_UNORM;
 }
 
-void GfxRenderingAPIDX11::UploadCompressedTexture(const uint8_t* data, uint32_t width,
-                                                   uint32_t height, GfxCompressedTexFormat format,
-                                                   uint32_t mipCount) {
+void GfxRenderingAPIDX11::UploadCompressedTexture(const uint8_t* data, uint32_t width, uint32_t height,
+                                                  GfxCompressedTexFormat format, uint32_t mipCount) {
     DXGI_FORMAT dxgiFormat;
     uint32_t blockSize;
     switch (format) {
@@ -636,8 +635,8 @@ void GfxRenderingAPIDX11::UploadCompressedTexture(const uint8_t* data, uint32_t 
         levelData += levelSize;
     }
 
-    ThrowIfFailed(mDevice->CreateTexture2D(&texture_desc, subresources.data(),
-                                           texture_data->texture.ReleaseAndGetAddressOf()));
+    ThrowIfFailed(
+        mDevice->CreateTexture2D(&texture_desc, subresources.data(), texture_data->texture.ReleaseAndGetAddressOf()));
     ThrowIfFailed(mDevice->CreateShaderResourceView(texture_data->texture.Get(), nullptr,
                                                     texture_data->resource_view.ReleaseAndGetAddressOf()));
 }

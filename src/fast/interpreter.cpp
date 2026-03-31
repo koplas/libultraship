@@ -883,13 +883,12 @@ void Interpreter::ImportTextureImg(int tile, bool importReplacement) {
         }
 
         const auto it = mMaskedTextures.find(basePath);
-        if (it != mMaskedTextures.end()
-                && it->second.compressedFormat != GfxCompressedTexFormat::None
-                && it->second.replacementData != nullptr) {
+        if (it != mMaskedTextures.end() && it->second.compressedFormat != GfxCompressedTexFormat::None &&
+            it->second.replacementData != nullptr) {
             const MaskedTextureEntry& entry = it->second;
-            mRapi->UploadCompressedTexture(entry.replacementData,
-                                           entry.replacementResource->Width, entry.replacementResource->Height,
-                                           entry.compressedFormat, entry.compressedMipCount);
+            mRapi->UploadCompressedTexture(entry.replacementData, entry.replacementResource->Width,
+                                           entry.replacementResource->Height, entry.compressedFormat,
+                                           entry.compressedMipCount);
             return;
         }
     }
@@ -904,7 +903,7 @@ void Interpreter::ImportTextureImg(int tile, bool importReplacement) {
         if (it != mMaskedTextures.end()) {
             addr = it->second.replacementData;
             if (it->second.replacementResource) {
-                uploadWidth  = it->second.replacementResource->Width;
+                uploadWidth = it->second.replacementResource->Width;
                 uploadHeight = it->second.replacementResource->Height;
             }
         }
@@ -1022,19 +1021,16 @@ void Interpreter::ImportTexture(int i, int tile, bool importReplacement) {
         // always holds the current resource's ImageData (kept alive by raw_tex_metadata).
         const bool isKtxRaw = (metadata->type == Fast::TextureType::KtxRaw);
         if ((importReplacement || isKtxRaw) && metadata->resource != nullptr) {
-            const auto it = mMaskedTextures.find(
-                GetBaseTexturePath(metadata->resource->GetInitData()->Path));
+            const auto it = mMaskedTextures.find(GetBaseTexturePath(metadata->resource->GetInitData()->Path));
             if (it != mMaskedTextures.end() && it->second.replacementData != nullptr) {
                 if (!isKtxRaw ||
-                    it->second.replacementResource ==
-                        std::static_pointer_cast<Fast::Texture>(metadata->resource))
+                    it->second.replacementResource == std::static_pointer_cast<Fast::Texture>(metadata->resource))
                     return it->second.replacementData;
             }
         }
 #else
         if (importReplacement && metadata->resource != nullptr) {
-            const auto it = mMaskedTextures.find(
-                GetBaseTexturePath(metadata->resource->GetInitData()->Path));
+            const auto it = mMaskedTextures.find(GetBaseTexturePath(metadata->resource->GetInitData()->Path));
             if (it != mMaskedTextures.end()) {
                 return it->second.replacementData;
             }
@@ -1720,13 +1716,11 @@ void Interpreter::GfxSpTri1(uint8_t vtx1_idx, uint8_t vtx2_idx, uint8_t vtx3_idx
             // Fix: replace tex_width/height with the KTX resource's actual pixel
             // dimensions so UV is normalised against the full uploaded image.
             {
-                const auto& texMeta =
-                    mRdp->loaded_texture[mRdp->texture_tile[tile].tmem_index];
+                const auto& texMeta = mRdp->loaded_texture[mRdp->texture_tile[tile].tmem_index];
                 if ((texMeta.tex_flags & TEX_FLAG_LOAD_AS_IMG) != 0 &&
-                    texMeta.raw_tex_metadata.type == Fast::TextureType::KtxRaw &&
-                    texMeta.raw_tex_metadata.width > 0 &&
+                    texMeta.raw_tex_metadata.type == Fast::TextureType::KtxRaw && texMeta.raw_tex_metadata.width > 0 &&
                     texMeta.raw_tex_metadata.height > 0) {
-                    tex_width[i]  = texMeta.raw_tex_metadata.width;
+                    tex_width[i] = texMeta.raw_tex_metadata.width;
                     tex_height[i] = texMeta.raw_tex_metadata.height;
                 }
             }
@@ -3572,8 +3566,7 @@ bool gfx_set_timg_otr_hash_handler_custom(F3DGfx** cmd0) {
     }
 
     auto rm = Ship::Context::GetInstance()->GetResourceManager();
-    std::shared_ptr<Fast::Texture> texture =
-        std::static_pointer_cast<Fast::Texture>(rm->GetCachedResource(fileName));
+    std::shared_ptr<Fast::Texture> texture = std::static_pointer_cast<Fast::Texture>(rm->GetCachedResource(fileName));
     if (texture == nullptr) {
         // Not cached yet — kick off an async load.
         // Fallback: continue and use the original N64 texture data already in RAM.
@@ -4755,13 +4748,14 @@ int32_t gfx_check_image_signature(const char* imgData) {
 bool Interpreter::TranscodeKtxTexture(Fast::Texture* texRes, MaskedTextureEntry& entry) {
     if (texRes->CompressedFormat == GfxCompressedTexFormat::None) {
         // Fallback: transcode now (renderer was not ready at load time).
-        if (mRapi == nullptr) return false;
+        if (mRapi == nullptr)
+            return false;
         const GfxCompressedTexFormat preferred = mRapi->GetPreferredCompressedFormat();
         if (!Fast::TranscodeKtxTexture(texRes, preferred))
             return false;
     }
-    entry.replacementData    = texRes->ImageData;
-    entry.compressedFormat   = texRes->CompressedFormat;
+    entry.replacementData = texRes->ImageData;
+    entry.compressedFormat = texRes->CompressedFormat;
     entry.compressedMipCount = texRes->CompressedMipCount;
     return true;
 }

@@ -358,9 +358,8 @@ GfxCompressedTexFormat GfxRenderingAPIMetal::GetPreferredCompressedFormat() cons
 #endif
 }
 
-void GfxRenderingAPIMetal::UploadCompressedTexture(const uint8_t* data, uint32_t width,
-                                                    uint32_t height, GfxCompressedTexFormat format,
-                                                    uint32_t mipCount) {
+void GfxRenderingAPIMetal::UploadCompressedTexture(const uint8_t* data, uint32_t width, uint32_t height,
+                                                   GfxCompressedTexFormat format, uint32_t mipCount) {
     MTL::PixelFormat pixelFormat;
     NS::UInteger blockSize;
     switch (format) {
@@ -384,8 +383,7 @@ void GfxRenderingAPIMetal::UploadCompressedTexture(const uint8_t* data, uint32_t
 
     NS::AutoreleasePool* autorelease_pool = NS::AutoreleasePool::alloc()->init();
 
-    MTL::TextureDescriptor* descriptor =
-        MTL::TextureDescriptor::texture2DDescriptor(pixelFormat, width, height, false);
+    MTL::TextureDescriptor* descriptor = MTL::TextureDescriptor::texture2DDescriptor(pixelFormat, width, height, false);
     descriptor->setMipmapLevelCount(static_cast<NS::UInteger>(mipCount));
     descriptor->setStorageMode(MTL::StorageModeShared);
 

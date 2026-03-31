@@ -66,20 +66,29 @@ void SetKtxPreferredFormat(GfxCompressedTexFormat fmt) {
 bool TranscodeKtxTexture(Texture* texture, GfxCompressedTexFormat preferred) {
     ktx_transcode_fmt_e target;
     switch (preferred) {
-        case GfxCompressedTexFormat::BC3_UNORM:  target = KTX_TTF_BC3_RGBA;      break;
-        case GfxCompressedTexFormat::BC7_UNORM:  target = KTX_TTF_BC7_RGBA;      break;
-        case GfxCompressedTexFormat::ETC2_RGBA8: target = KTX_TTF_ETC2_RGBA;     break;
-        case GfxCompressedTexFormat::ASTC_4x4:   target = KTX_TTF_ASTC_4x4_RGBA; break;
+        case GfxCompressedTexFormat::BC3_UNORM:
+            target = KTX_TTF_BC3_RGBA;
+            break;
+        case GfxCompressedTexFormat::BC7_UNORM:
+            target = KTX_TTF_BC7_RGBA;
+            break;
+        case GfxCompressedTexFormat::ETC2_RGBA8:
+            target = KTX_TTF_ETC2_RGBA;
+            break;
+        case GfxCompressedTexFormat::ASTC_4x4:
+            target = KTX_TTF_ASTC_4x4_RGBA;
+            break;
         default:
             SPDLOG_ERROR("TranscodeKtxTexture: unsupported format for '{}'", texture->GetInitData()->Path);
             return false;
     }
 
     ktxTexture2* kTex = nullptr;
-    KTX_error_code result = ktxTexture2_CreateFromMemory(
-        texture->ImageData, texture->ImageDataSize, KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT, &kTex);
+    KTX_error_code result = ktxTexture2_CreateFromMemory(texture->ImageData, texture->ImageDataSize,
+                                                         KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT, &kTex);
     if (result != KTX_SUCCESS) {
-        SPDLOG_ERROR("TranscodeKtxTexture: failed to open '{}': {}", texture->GetInitData()->Path, ktxErrorString(result));
+        SPDLOG_ERROR("TranscodeKtxTexture: failed to open '{}': {}", texture->GetInitData()->Path,
+                     ktxErrorString(result));
         return false;
     }
 
@@ -108,7 +117,8 @@ bool TranscodeKtxTexture(Texture* texture, GfxCompressedTexFormat preferred) {
         texture->CompressedFormat = preferred;
         texture->CompressedMipCount = kTex->numLevels;
     } else {
-        SPDLOG_ERROR("TranscodeKtxTexture: transcode failed for '{}': {}", texture->GetInitData()->Path, ktxErrorString(result));
+        SPDLOG_ERROR("TranscodeKtxTexture: transcode failed for '{}': {}", texture->GetInitData()->Path,
+                     ktxErrorString(result));
     }
 
     ktxTexture_Destroy(ktxTexture(kTex));
@@ -161,8 +171,7 @@ ResourceFactoryKtxTextureV0::ReadResource(std::shared_ptr<Ship::File> file,
     // thread pool, so there is no main-thread stall. If the preferred format has
     // not been registered yet (renderer not initialised) the raw bytes stay in
     // ImageData and ImportTextureImg will transcode synchronously as a fallback.
-    const auto preferred = static_cast<GfxCompressedTexFormat>(
-        s_ktxPreferredFormat.load(std::memory_order_relaxed));
+    const auto preferred = static_cast<GfxCompressedTexFormat>(s_ktxPreferredFormat.load(std::memory_order_relaxed));
     if (preferred != GfxCompressedTexFormat::None)
         TranscodeKtxTexture(texture.get(), preferred);
 

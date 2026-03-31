@@ -751,9 +751,8 @@ GfxCompressedTexFormat GfxRenderingAPIOGL::GetPreferredCompressedFormat() const 
 #define GL_COMPRESSED_RGBA8_ETC2_EAC 0x9278
 #endif
 
-void GfxRenderingAPIOGL::UploadCompressedTexture(const uint8_t* data, uint32_t width,
-                                                  uint32_t height, GfxCompressedTexFormat format,
-                                                  uint32_t mipCount) {
+void GfxRenderingAPIOGL::UploadCompressedTexture(const uint8_t* data, uint32_t width, uint32_t height,
+                                                 GfxCompressedTexFormat format, uint32_t mipCount) {
     GLenum glFormat;
     switch (format) {
         case GfxCompressedTexFormat::BC3_UNORM:
@@ -777,9 +776,8 @@ void GfxRenderingAPIOGL::UploadCompressedTexture(const uint8_t* data, uint32_t w
         const uint32_t mipWidth = std::max(1u, width >> level);
         const uint32_t mipHeight = std::max(1u, height >> level);
         const uint32_t levelSize = ((mipWidth + 3) / 4) * ((mipHeight + 3) / 4) * kBlockSize;
-        glCompressedTexImage2D(GL_TEXTURE_2D, static_cast<GLint>(level), glFormat,
-                               static_cast<GLsizei>(mipWidth), static_cast<GLsizei>(mipHeight), 0,
-                               static_cast<GLsizei>(levelSize), levelData);
+        glCompressedTexImage2D(GL_TEXTURE_2D, static_cast<GLint>(level), glFormat, static_cast<GLsizei>(mipWidth),
+                               static_cast<GLsizei>(mipHeight), 0, static_cast<GLsizei>(levelSize), levelData);
         levelData += levelSize;
     }
     textures[mCurrentTextureIds[mCurrentTile]].width = static_cast<uint16_t>(width);
