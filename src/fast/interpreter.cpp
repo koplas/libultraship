@@ -868,14 +868,14 @@ void Interpreter::ImportTextureImg(int tile, bool importReplacement) {
         // (bypassing RegisterBlendedTexture). Transcoding already happened on the
         // resource-loading thread pool in ReadResource; just populate the entry.
         // Also refresh a stale entry when the resource was evicted and reloaded:
-        // the ResourceManager creates a new Texture object so ktxResource != texRes.
+        // the ResourceManager creates a new Texture object so replacementResource != texRes.
         if (isKtxRaw) {
             auto texRes = std::static_pointer_cast<Fast::Texture>(metadata->resource);
             if (texRes && texRes->ImageData != nullptr) {
                 const auto it = mMaskedTextures.find(basePath);
-                if (it == mMaskedTextures.end() || it->second.ktxResource != texRes) {
+                if (it == mMaskedTextures.end() || it->second.replacementResource != texRes) {
                     MaskedTextureEntry mapEntry{ nullptr, nullptr };
-                    mapEntry.ktxResource = texRes;
+                    mapEntry.replacementResource = texRes;
                     TranscodeKtxTexture(texRes.get(), mapEntry);
                     mMaskedTextures[basePath] = std::move(mapEntry);
                 }
@@ -888,7 +888,7 @@ void Interpreter::ImportTextureImg(int tile, bool importReplacement) {
                 && it->second.replacementData != nullptr) {
             const MaskedTextureEntry& entry = it->second;
             mRapi->UploadCompressedTexture(entry.replacementData,
-                                           entry.replacementWidth, entry.replacementHeight,
+                                           entry.replacementResource->Width, entry.replacementResource->Height,
                                            entry.compressedFormat, entry.compressedMipCount);
             return;
         }
@@ -903,8 +903,10 @@ void Interpreter::ImportTextureImg(int tile, bool importReplacement) {
         const auto it = mMaskedTextures.find(GetBaseTexturePath(metadata->resource->GetInitData()->Path));
         if (it != mMaskedTextures.end()) {
             addr = it->second.replacementData;
-            if (it->second.replacementWidth)  uploadWidth  = it->second.replacementWidth;
-            if (it->second.replacementHeight) uploadHeight = it->second.replacementHeight;
+            if (it->second.replacementResource) {
+                uploadWidth  = it->second.replacementResource->Width;
+                uploadHeight = it->second.replacementResource->Height;
+            }
         }
     }
     if (addr == nullptr) {
@@ -1024,7 +1026,7 @@ void Interpreter::ImportTexture(int i, int tile, bool importReplacement) {
                 GetBaseTexturePath(metadata->resource->GetInitData()->Path));
             if (it != mMaskedTextures.end() && it->second.replacementData != nullptr) {
                 if (!isKtxRaw ||
-                    it->second.ktxResource ==
+                    it->second.replacementResource ==
                         std::static_pointer_cast<Fast::Texture>(metadata->resource))
                     return it->second.replacementData;
             }
@@ -4765,8 +4767,6 @@ bool Interpreter::TranscodeKtxTexture(Fast::Texture* texRes, MaskedTextureEntry&
             return false;
     }
     entry.replacementData    = texRes->ImageData;
-    entry.replacementWidth   = texRes->Width;
-    entry.replacementHeight  = texRes->Height;
     entry.compressedFormat   = texRes->CompressedFormat;
     entry.compressedMipCount = texRes->CompressedMipCount;
     return true;
@@ -4785,22 +4785,18 @@ void Interpreter::RegisterBlendedTexture(const char* name, uint8_t* mask, uint8_
             Ship::Context::GetInstance()->GetResourceManager()->LoadResourceProcess(
                 reinterpret_cast<char*>(replacement)));
 
+        entry.replacementResource = texRes;
 #ifdef INCLUDE_KTX_SUPPORT
         if (texRes && texRes->Type == Fast::TextureType::KtxRaw) {
             // Transcoding already happened on the resource-loading thread pool in
             // ReadResource. TranscodeKtxTexture just populates the entry from the
             // resource, or transcodes synchronously if the format wasn't set yet.
-            entry.ktxResource = texRes;
             TranscodeKtxTexture(texRes.get(), entry);
             mMaskedTextures[name] = std::move(entry);
             return;
         }
 #endif
         entry.replacementData = texRes ? texRes->ImageData : nullptr;
-        if (texRes) {
-            entry.replacementWidth  = static_cast<uint16_t>(texRes->Width);
-            entry.replacementHeight = static_cast<uint16_t>(texRes->Height);
-        }
     } else {
         entry.replacementData = replacement;
     }

@@ -350,19 +350,17 @@ struct FBInfo {
 struct MaskedTextureEntry {
     uint8_t* mask;
     uint8_t* replacementData;
-    uint16_t replacementWidth = 0;
-    uint16_t replacementHeight = 0;
-#ifdef INCLUDE_KTX_SUPPORT
-    // Set when replacementData holds GPU-native block-compressed data
-    // (transcoded from KTX2). replacementWidth/Height give the base dimensions.
-    // All mip levels are stored consecutively in replacementData (level 0 first).
-    uint32_t compressedMipCount = 1;
-    GfxCompressedTexFormat compressedFormat = GfxCompressedTexFormat::None;
     // Owning reference to the Texture resource whose ImageData backs replacementData.
     // Prevents the resource (and its ImageData allocation) from being freed by the
     // ResourceManager while this entry is live. Without this, replacementData and
     // any cache keys derived from it become dangling pointers after resource eviction.
-    std::shared_ptr<Fast::Texture> ktxResource;
+    std::shared_ptr<Fast::Texture> replacementResource;
+#ifdef INCLUDE_KTX_SUPPORT
+    // Set when replacementData holds GPU-native block-compressed data
+    // (transcoded from KTX2).
+    // All mip levels are stored consecutively in replacementData (level 0 first).
+    uint32_t compressedMipCount = 1;
+    GfxCompressedTexFormat compressedFormat = GfxCompressedTexFormat::None;
 #endif
 };
 
