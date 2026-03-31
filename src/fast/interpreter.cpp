@@ -3536,21 +3536,19 @@ bool gfx_set_timg_handler_rdp(F3DGfx** cmd0) {
                 std::static_pointer_cast<Fast::Texture>(rm->GetCachedResource(imgData));
 
             if (tex == nullptr) {
-                // Not cached yet — kick off an async load on the thread pool and skip
-                // this frame. The resource will be in cache within a frame or two.
+                // Not cached yet — kick off an async load on the thread pool.
+                // Fallback: continue and use the original N64 texture already in RAM.
                 rm->LoadResourceAsync(imgData);
-                (*cmd0)++;
-                return false;
+            } else {
+                i = (uintptr_t) reinterpret_cast<char*>(tex->ImageData);
+                texFlags = tex->Flags;
+                rawTexMetdata.width = tex->Width;
+                rawTexMetdata.height = tex->Height;
+                rawTexMetdata.h_byte_scale = tex->HByteScale;
+                rawTexMetdata.v_pixel_scale = tex->VPixelScale;
+                rawTexMetdata.type = tex->Type;
+                rawTexMetdata.resource = tex;
             }
-
-            i = (uintptr_t) reinterpret_cast<char*>(tex->ImageData);
-            texFlags = tex->Flags;
-            rawTexMetdata.width = tex->Width;
-            rawTexMetdata.height = tex->Height;
-            rawTexMetdata.h_byte_scale = tex->HByteScale;
-            rawTexMetdata.v_pixel_scale = tex->VPixelScale;
-            rawTexMetdata.type = tex->Type;
-            rawTexMetdata.resource = tex;
         }
     }
 
@@ -3577,12 +3575,10 @@ bool gfx_set_timg_otr_hash_handler_custom(F3DGfx** cmd0) {
     std::shared_ptr<Fast::Texture> texture =
         std::static_pointer_cast<Fast::Texture>(rm->GetCachedResource(fileName));
     if (texture == nullptr) {
-        // Not cached yet — kick off an async load and skip this frame.
+        // Not cached yet — kick off an async load.
+        // Fallback: continue and use the original N64 texture data already in RAM.
         rm->LoadResourceAsync(fileName);
-        (*cmd0)++;
-        return false;
-    }
-    if (texture != nullptr) {
+    } else {
         texFlags = texture->Flags;
         rawTexMetadata.width = texture->Width;
         rawTexMetadata.height = texture->Height;
@@ -3620,8 +3616,6 @@ bool gfx_set_timg_otr_hash_handler_custom(F3DGfx** cmd0) {
             Interpreter* gfx = mInstance.lock().get();
             gfx->GfxDpSetTextureImage(fmt, size, width, fileName, texFlags, rawTexMetadata, tex);
         }
-    } else {
-        SPDLOG_ERROR("G_SETTIMG_OTR_HASH: Texture is null");
     }
 
     (*cmd0)++;
