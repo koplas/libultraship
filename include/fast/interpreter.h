@@ -358,6 +358,11 @@ struct MaskedTextureEntry {
     // All mip levels are stored consecutively in replacementData (level 0 first).
     uint32_t compressedMipCount = 1;
     GfxCompressedTexFormat compressedFormat = GfxCompressedTexFormat::None;
+    // Owning reference to the Texture resource whose ImageData backs replacementData.
+    // Prevents the resource (and its ImageData allocation) from being freed by the
+    // ResourceManager while this entry is live. Without this, replacementData and
+    // any cache keys derived from it become dangling pointers after resource eviction.
+    std::shared_ptr<Fast::Texture> ktxResource;
 #endif
 };
 
