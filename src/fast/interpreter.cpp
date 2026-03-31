@@ -858,65 +858,43 @@ void Interpreter::ImportTextureImg(int tile, bool importReplacement) {
     const RawTexMetadata* metadata = &mRdp->loaded_texture[mRdp->texture_tile[tile].tmem_index].raw_tex_metadata;
 
 #ifdef INCLUDE_KTX_SUPPORT
-    const bool isKtxRaw = (metadata->type == Fast::TextureType::KtxRaw);
-    const bool doLookup = importReplacement || isKtxRaw;
-
-    if (doLookup && metadata->resource != nullptr) {
+    if (metadata->type == Fast::TextureType::KtxRaw && metadata->resource != nullptr) {
         const std::string basePath = GetBaseTexturePath(metadata->resource->GetInitData()->Path);
-
-        // Auto-register KtxRaw textures that arrived via direct archive override
-        // (bypassing RegisterBlendedTexture). Transcoding already happened on the
-        // resource-loading thread pool in ReadResource; just populate the entry.
-        // Also refresh a stale entry when the resource was evicted and reloaded:
-        // the ResourceManager creates a new Texture object so ktxResource != texRes.
-        if (isKtxRaw) {
-            auto texRes = std::static_pointer_cast<Fast::Texture>(metadata->resource);
-            if (texRes && texRes->ImageData != nullptr) {
-                const auto it = mMaskedTextures.find(basePath);
-                if (it == mMaskedTextures.end() || it->second.ktxResource != texRes) {
-                    MaskedTextureEntry mapEntry{ nullptr, nullptr };
-                    mapEntry.ktxResource = texRes;
-                    TranscodeKtxTexture(texRes.get(), mapEntry);
-                    mMaskedTextures[basePath] = std::move(mapEntry);
-                }
+        auto texRes = std::static_pointer_cast<Fast::Texture>(metadata->resource);
+        if (texRes && texRes->ImageData != nullptr) {
+            const auto it = mMaskedTextures.find(basePath);
+            if (it == mMaskedTextures.end() || it->second.ktxResource != texRes) {
+                MaskedTextureEntry mapEntry{ nullptr, nullptr };
+                mapEntry.ktxResource = texRes;
+                TranscodeKtxTexture(texRes.get(), mapEntry);
+                mMaskedTextures[basePath] = std::move(mapEntry);
             }
         }
-
         const auto it = mMaskedTextures.find(basePath);
-        if (it != mMaskedTextures.end()
-                && it->second.compressedFormat != GfxCompressedTexFormat::None
+        if (it != mMaskedTextures.end() && it->second.compressedFormat != GfxCompressedTexFormat::None
                 && it->second.replacementData != nullptr) {
             const MaskedTextureEntry& entry = it->second;
-            mRapi->UploadCompressedTexture(entry.replacementData,
-                                           entry.replacementWidth, entry.replacementHeight,
-                                           entry.compressedFormat, entry.compressedMipCount);
+            mRapi->UploadCompressedTexture(entry.replacementData, entry.replacementWidth,
+                                           entry.replacementHeight, entry.compressedFormat,
+                                           entry.compressedMipCount);
             return;
         }
     }
 #endif
 
-    const uint8_t* addr = nullptr;
-    uint16_t uploadWidth = metadata->width;
-    uint16_t uploadHeight = metadata->height;
-
-    if (importReplacement && metadata->resource != nullptr) {
-        const auto it = mMaskedTextures.find(GetBaseTexturePath(metadata->resource->GetInitData()->Path));
-        if (it != mMaskedTextures.end()) {
-            addr = it->second.replacementData;
-            if (it->second.replacementWidth)  uploadWidth  = it->second.replacementWidth;
-            if (it->second.replacementHeight) uploadHeight = it->second.replacementHeight;
-        }
-    }
-    if (addr == nullptr) {
-        addr = mRdp->loaded_texture[mRdp->texture_tile[tile].tmem_index].addr;
-    }
+    const uint8_t* addr =
+        importReplacement && (metadata->resource != nullptr)
+            ? mMaskedTextures.find(GetBaseTexturePath(metadata->resource->GetInitData()->Path))->second.replacementData
+            : mRdp->loaded_texture[mRdp->texture_tile[tile].tmem_index].addr;
 
     if (addr == nullptr) {
         SPDLOG_ERROR("ImportTextureImg: null texture address for tile {}", tile);
         return;
     }
 
-    mRapi->UploadTexture(addr, uploadWidth, uploadHeight);
+    uint16_t width = metadata->width;
+    uint16_t height = metadata->height;
+    mRapi->UploadTexture(addr, width, height);
 }
 
 void Interpreter::ImportTextureRaw(int tile, bool importReplacement) {
@@ -1010,14 +988,10 @@ void Interpreter::ImportTexture(int i, int tile, bool importReplacement) {
     const RawTexMetadata* metadata = &mRdp->loaded_texture[mRdp->texture_tile[tile].tmem_index].raw_tex_metadata;
     const uint8_t* origAddr = [&]() -> const uint8_t* {
 #ifdef INCLUDE_KTX_SUPPORT
-        // For KtxRaw textures, after transcoding replaces ImageData the original
-        // raw-bytes pointer stored in loaded_texture.addr is stale. Look up
-        // mMaskedTextures regardless of importReplacement to get the stable pointer.
-        // Guard: only use the cached replacementData if it was registered for the
-        // current resource instance. After eviction and reload the ResourceManager
-        // creates a new Texture object (new ImageData), so ktxResource != texRes
-        // signals a stale entry and we fall back to loaded_texture.addr which
-        // always holds the current resource's ImageData (kept alive by raw_tex_metadata).
+        // KtxRaw textures must always be looked up via mMaskedTextures so the
+        // cache key uses the transcoded buffer rather than the raw KTX bytes.
+        // Guard: only use the cached pointer if the entry belongs to the current
+        // resource instance — after eviction/reload ktxResource != texRes means stale.
         const bool isKtxRaw = (metadata->type == Fast::TextureType::KtxRaw);
         if ((importReplacement || isKtxRaw) && metadata->resource != nullptr) {
             const auto it = mMaskedTextures.find(
@@ -1033,9 +1007,8 @@ void Interpreter::ImportTexture(int i, int tile, bool importReplacement) {
         if (importReplacement && metadata->resource != nullptr) {
             const auto it = mMaskedTextures.find(
                 GetBaseTexturePath(metadata->resource->GetInitData()->Path));
-            if (it != mMaskedTextures.end()) {
+            if (it != mMaskedTextures.end())
                 return it->second.replacementData;
-            }
         }
 #endif
         return mRdp->loaded_texture[tmemIdex].addr;
@@ -1590,9 +1563,7 @@ void Interpreter::GfxSpTri1(uint8_t vtx1_idx, uint8_t vtx2_idx, uint8_t vtx3_idx
                       (mRdp->other_mode_l & (3 << 16)) == (G_BL_1MA << 16)) ||
                      ((mRdp->other_mode_l & (3 << 22)) == (G_BL_CLR_MEM << 22) &&
                       (mRdp->other_mode_l & (3 << 18)) == (G_BL_1MA << 18));
-    uint8_t blend_src = mRdp->other_mode_l >> 30;
-    bool use_blend_color = blend_src == G_BL_CLR_BL;
-    bool use_fog = blend_src == G_BL_CLR_FOG || use_blend_color;
+    bool use_fog = (mRdp->other_mode_l >> 30) == G_BL_CLR_FOG;
     bool texture_edge = (mRdp->other_mode_l & CVG_X_ALPHA) == CVG_X_ALPHA;
     bool use_noise = (mRdp->other_mode_l & (3U << G_MDSFT_ALPHACOMPARE)) == G_AC_DITHER;
     bool use_2cyc = (mRdp->other_mode_h & (3U << G_MDSFT_CYCLETYPE)) == G_CYC_2CYCLE;
@@ -1708,22 +1679,15 @@ void Interpreter::GfxSpTri1(uint8_t vtx1_idx, uint8_t vtx2_idx, uint8_t vtx3_idx
             tex_width[i] = line_size;
 
 #ifdef INCLUDE_KTX_SUPPORT
-            // For KtxRaw textures the entire KTX image is uploaded as one unit
-            // (TEX_FLAG_LOAD_AS_IMG). The N64 game may load only a horizontal strip
-            // into TMEM per draw call, so orig_size_bytes reflects the strip size —
-            // not the full image. This makes tex_width/height equal to the strip
-            // dimensions, so vertex UV coordinates for strips beyond the first exceed
-            // [0,1] and wrap, producing a repeated pattern instead of the intended
-            // stretched image.
-            // Fix: replace tex_width/height with the KTX resource's actual pixel
-            // dimensions so UV is normalised against the full uploaded image.
+            // KtxRaw uploads the full image as one unit. The N64 game may load only
+            // a horizontal strip per draw call, so line_size reflects the strip width,
+            // not the full image — causing UVs to wrap and produce a repeated pattern.
+            // Use the KTX resource dimensions to normalise UVs against the full image.
             {
-                const auto& texMeta =
-                    mRdp->loaded_texture[mRdp->texture_tile[tile].tmem_index];
+                const auto& texMeta = mRdp->loaded_texture[mRdp->texture_tile[tile].tmem_index];
                 if ((texMeta.tex_flags & TEX_FLAG_LOAD_AS_IMG) != 0 &&
                     texMeta.raw_tex_metadata.type == Fast::TextureType::KtxRaw &&
-                    texMeta.raw_tex_metadata.width > 0 &&
-                    texMeta.raw_tex_metadata.height > 0) {
+                    texMeta.raw_tex_metadata.width > 0 && texMeta.raw_tex_metadata.height > 0) {
                     tex_width[i]  = texMeta.raw_tex_metadata.width;
                     tex_height[i] = texMeta.raw_tex_metadata.height;
                 }
@@ -1852,18 +1816,10 @@ void Interpreter::GfxSpTri1(uint8_t vtx1_idx, uint8_t vtx2_idx, uint8_t vtx3_idx
         }
 
         if (use_fog) {
-            if (use_blend_color) {
-                // Shroud/blend mode: blend toward blend_color using fog alpha as factor
-                mBufVbo[mBufVboLen++] = mRdp->blend_color.r / 255.0f;
-                mBufVbo[mBufVboLen++] = mRdp->blend_color.g / 255.0f;
-                mBufVbo[mBufVboLen++] = mRdp->blend_color.b / 255.0f;
-                mBufVbo[mBufVboLen++] = mRdp->fog_color.a / 255.0f;
-            } else {
-                mBufVbo[mBufVboLen++] = mRdp->fog_color.r / 255.0f;
-                mBufVbo[mBufVboLen++] = mRdp->fog_color.g / 255.0f;
-                mBufVbo[mBufVboLen++] = mRdp->fog_color.b / 255.0f;
-                mBufVbo[mBufVboLen++] = v_arr[i]->color.a / 255.0f; // fog factor (not alpha)
-            }
+            mBufVbo[mBufVboLen++] = mRdp->fog_color.r / 255.0f;
+            mBufVbo[mBufVboLen++] = mRdp->fog_color.g / 255.0f;
+            mBufVbo[mBufVboLen++] = mRdp->fog_color.b / 255.0f;
+            mBufVbo[mBufVboLen++] = v_arr[i]->color.a / 255.0f; // fog factor (not alpha)
         }
 
         if (use_grayscale) {
@@ -1935,9 +1891,8 @@ void Interpreter::GfxSpTri1(uint8_t vtx1_idx, uint8_t vtx2_idx, uint8_t vtx3_idx
                     mBufVbo[mBufVboLen++] = color->g / 255.0f;
                     mBufVbo[mBufVboLen++] = color->b / 255.0f;
                 } else {
-                    if (use_fog && !use_blend_color && color == &v_arr[i]->color) {
-                        // Shade alpha is 100% for standard fog, blend color mode preserves
-                        // it since fog alpha is the blend factor
+                    if (use_fog && color == &v_arr[i]->color) {
+                        // Shade alpha is 100% for fog
                         mBufVbo[mBufVboLen++] = 1.0f;
                     } else {
                         mBufVbo[mBufVboLen++] = color->a / 255.0f;
@@ -2407,10 +2362,7 @@ void Interpreter::GfxDpSetFogColor(uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
 }
 
 void Interpreter::GfxDpSetBlendColor(uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
-    mRdp->blend_color.r = r;
-    mRdp->blend_color.g = g;
-    mRdp->blend_color.b = b;
-    mRdp->blend_color.a = a;
+    // TODO: Implement this command..
 }
 
 void Interpreter::GfxDpSetFillColor(uint32_t packed_color) {
@@ -3528,15 +3480,10 @@ bool gfx_set_timg_handler_rdp(F3DGfx** cmd0) {
 
     if ((i & 1) != 1) {
         if (gfx_check_image_signature(imgData) == 1) {
-            auto rm = Ship::Context::GetInstance()->GetResourceManager();
-            // Check the cache first so we never block the render thread.
-            std::shared_ptr<Fast::Texture> tex =
-                std::static_pointer_cast<Fast::Texture>(rm->GetCachedResource(imgData));
+            std::shared_ptr<Fast::Texture> tex = std::static_pointer_cast<Fast::Texture>(
+                Ship::Context::GetInstance()->GetResourceManager()->LoadResourceProcess(imgData));
 
             if (tex == nullptr) {
-                // Not cached yet — kick off an async load on the thread pool and skip
-                // this frame. The resource will be in cache within a frame or two.
-                rm->LoadResourceAsync(imgData);
                 (*cmd0)++;
                 return false;
             }
@@ -3571,15 +3518,9 @@ bool gfx_set_timg_otr_hash_handler_custom(F3DGfx** cmd0) {
         return false;
     }
 
-    auto rm = Ship::Context::GetInstance()->GetResourceManager();
     std::shared_ptr<Fast::Texture> texture =
-        std::static_pointer_cast<Fast::Texture>(rm->GetCachedResource(fileName));
-    if (texture == nullptr) {
-        // Not cached yet — kick off an async load and skip this frame.
-        rm->LoadResourceAsync(fileName);
-        (*cmd0)++;
-        return false;
-    }
+        std::static_pointer_cast<Fast::Texture>(Ship::Context::GetInstance()->GetResourceManager()->LoadResourceProcess(
+            Ship::Context::GetInstance()->GetResourceManager()->GetArchiveManager()->HashToCString(hash)));
     if (texture != nullptr) {
         texFlags = texture->Flags;
         rawTexMetadata.width = texture->Width;
@@ -4383,8 +4324,6 @@ void Interpreter::Init(class GfxWindowBackend* wapi, class GfxRenderingAPI* rapi
     mRapi->Init();
     mRapi->UpdateFramebufferParameters(0, width, height, 1, false, true, true, true);
 #ifdef INCLUDE_KTX_SUPPORT
-    // Register the preferred format so ResourceFactoryKtxTextureV0::ReadResource
-    // can transcode KTX2 textures inline on the resource-loading thread pool.
     Fast::SetKtxPreferredFormat(mRapi->GetPreferredCompressedFormat());
 #endif
     mCurDimensions.internal_mul =
@@ -4754,19 +4693,16 @@ int32_t gfx_check_image_signature(const char* imgData) {
 
 #ifdef INCLUDE_KTX_SUPPORT
 // Populates a MaskedTextureEntry from an already-transcoded KtxRaw resource.
-// If the resource hasn't been transcoded yet (renderer was not ready when
-// ReadResource ran), falls back to transcoding synchronously here.
+// Falls back to transcoding synchronously if the format was not set yet.
 bool Interpreter::TranscodeKtxTexture(Fast::Texture* texRes, MaskedTextureEntry& entry) {
     if (texRes->CompressedFormat == GfxCompressedTexFormat::None) {
-        // Fallback: transcode now (renderer was not ready at load time).
         if (mRapi == nullptr) return false;
-        const GfxCompressedTexFormat preferred = mRapi->GetPreferredCompressedFormat();
-        if (!Fast::TranscodeKtxTexture(texRes, preferred))
+        if (!Fast::TranscodeKtxTexture(texRes, mRapi->GetPreferredCompressedFormat()))
             return false;
     }
     entry.replacementData    = texRes->ImageData;
-    entry.replacementWidth   = texRes->Width;
-    entry.replacementHeight  = texRes->Height;
+    entry.replacementWidth   = static_cast<uint16_t>(texRes->Width);
+    entry.replacementHeight  = static_cast<uint16_t>(texRes->Height);
     entry.compressedFormat   = texRes->CompressedFormat;
     entry.compressedMipCount = texRes->CompressedMipCount;
     return true;
@@ -4787,9 +4723,6 @@ void Interpreter::RegisterBlendedTexture(const char* name, uint8_t* mask, uint8_
 
 #ifdef INCLUDE_KTX_SUPPORT
         if (texRes && texRes->Type == Fast::TextureType::KtxRaw) {
-            // Transcoding already happened on the resource-loading thread pool in
-            // ReadResource. TranscodeKtxTexture just populates the entry from the
-            // resource, or transcodes synchronously if the format wasn't set yet.
             entry.ktxResource = texRes;
             TranscodeKtxTexture(texRes.get(), entry);
             mMaskedTextures[name] = std::move(entry);
@@ -4797,10 +4730,6 @@ void Interpreter::RegisterBlendedTexture(const char* name, uint8_t* mask, uint8_
         }
 #endif
         entry.replacementData = texRes ? texRes->ImageData : nullptr;
-        if (texRes) {
-            entry.replacementWidth  = static_cast<uint16_t>(texRes->Width);
-            entry.replacementHeight = static_cast<uint16_t>(texRes->Height);
-        }
     } else {
         entry.replacementData = replacement;
     }
@@ -4812,6 +4741,7 @@ void Interpreter::UnregisterBlendedTexture(const char* name) {
     if (gfx_check_image_signature(name)) {
         name += 7;
     }
+
     mMaskedTextures.erase(name);
 }
 
