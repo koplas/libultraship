@@ -1707,6 +1707,29 @@ void Interpreter::GfxSpTri1(uint8_t vtx1_idx, uint8_t vtx2_idx, uint8_t vtx3_idx
             }
             tex_width[i] = line_size;
 
+#ifdef INCLUDE_KTX_SUPPORT
+            // For KtxRaw textures the entire KTX image is uploaded as one unit
+            // (TEX_FLAG_LOAD_AS_IMG). The N64 game may load only a horizontal strip
+            // into TMEM per draw call, so orig_size_bytes reflects the strip size —
+            // not the full image. This makes tex_width/height equal to the strip
+            // dimensions, so vertex UV coordinates for strips beyond the first exceed
+            // [0,1] and wrap, producing a repeated pattern instead of the intended
+            // stretched image.
+            // Fix: replace tex_width/height with the KTX resource's actual pixel
+            // dimensions so UV is normalised against the full uploaded image.
+            {
+                const auto& texMeta =
+                    mRdp->loaded_texture[mRdp->texture_tile[tile].tmem_index];
+                if ((texMeta.tex_flags & TEX_FLAG_LOAD_AS_IMG) != 0 &&
+                    texMeta.raw_tex_metadata.type == Fast::TextureType::KtxRaw &&
+                    texMeta.raw_tex_metadata.width > 0 &&
+                    texMeta.raw_tex_metadata.height > 0) {
+                    tex_width[i]  = texMeta.raw_tex_metadata.width;
+                    tex_height[i] = texMeta.raw_tex_metadata.height;
+                }
+            }
+#endif
+
             tex_width2[i] = (mRdp->texture_tile[tile].lrs - mRdp->texture_tile[tile].uls + 4) / 4;
             tex_height2[i] = (mRdp->texture_tile[tile].lrt - mRdp->texture_tile[tile].ult + 4) / 4;
 
