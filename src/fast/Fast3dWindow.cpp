@@ -12,6 +12,9 @@
 #include "fast/backends/gfx_direct3d_common.h"
 #include "fast/backends/gfx_direct3d11.h"
 #include "fast/backends/gfx_window_manager_api.h"
+#include "fast/resource/factory/TextureFactory.h"
+#include "fast/resource/ResourceType.h"
+#include "ship/resource/ResourceManager.h"
 
 #include <fstream>
 
@@ -95,6 +98,12 @@ void Fast3dWindow::Init() {
         Ship::Context::GetInstance()->GetConfig()->GetInt("Shortcuts.Fullscreen", Ship::KbScancode::LUS_KB_F11));
     Ship::Context::GetInstance()->GetWindow()->SetMouseCaptureScancode(
         Ship::Context::GetInstance()->GetConfig()->GetInt("Shortcuts.MouseCapture", Ship::KbScancode::LUS_KB_F2));
+
+#ifdef INCLUDE_KTX_SUPPORT
+    Ship::Context::GetInstance()->GetResourceManager()->GetResourceLoader()->RegisterResourceFactory(
+        std::make_shared<ResourceFactoryKtxTextureV0>(), RESOURCE_FORMAT_BINARY, "KtxTexture",
+        static_cast<uint32_t>(ResourceType::KtxTexture), 0);
+#endif
 
     InitWindowManager();
     mInterpreter->Init(mWindowManagerApi, mRenderingApi, Ship::Context::GetInstance()->GetName().c_str(), isFullscreen,

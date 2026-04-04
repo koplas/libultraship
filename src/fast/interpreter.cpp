@@ -25,6 +25,9 @@
 #include <string>
 
 #include "fast/interpreter.h"
+#ifdef INCLUDE_KTX_SUPPORT
+#include "fast/resource/factory/TextureFactory.h"
+#endif
 #include "fast/lus_gbi.h"
 #include "fast/backends/gfx_window_manager_api.h"
 #include "fast/backends/gfx_rendering_api.h"
@@ -984,10 +987,45 @@ void Interpreter::ImportTextureCi8(int tile, bool importReplacement) {
 
 void Interpreter::ImportTextureImg(int tile, bool importReplacement) {
     const RawTexMetadata* metadata = &mRdp->loaded_texture[mRdp->texture_tile[tile].tmem_index].raw_tex_metadata;
-    const uint8_t* addr =
-        importReplacement && (metadata->resource != nullptr)
-            ? mMaskedTextures.find(GetBaseTexturePath(metadata->resource->GetInitData()->Path))->second.replacementData
-            : mRdp->loaded_texture[mRdp->texture_tile[tile].tmem_index].addr;
+    const uint8_t* addr = nullptr;
+
+#ifdef INCLUDE_KTX_SUPPORT
+    GfxCompressedTexFormat compressedFormat = GfxCompressedTexFormat::None;
+    uint32_t compressedMipCount = 1;
+
+    if (importReplacement && (metadata->resource != nullptr)) {
+        auto it = mMaskedTextures.find(GetBaseTexturePath(metadata->resource->GetInitData()->Path));
+        if (it != mMaskedTextures.end()) {
+            addr = it->second.replacementData;
+            compressedFormat = it->second.compressedFormat;
+            compressedMipCount = it->second.compressedMipCount;
+        }
+    } else if (metadata->resource != nullptr) {
+        if (metadata->resource->CompressedFormat != GfxCompressedTexFormat::None) {
+            addr = metadata->resource->ImageData;
+            compressedFormat = metadata->resource->CompressedFormat;
+            compressedMipCount = metadata->resource->CompressedMipCount;
+        }
+    }
+
+    if (compressedFormat != GfxCompressedTexFormat::None) {
+        if (addr == nullptr) {
+            SPDLOG_ERROR("ImportTextureImg: null compressed texture address for tile {}", tile);
+            return;
+        }
+        uint16_t width = metadata->width;
+        uint16_t height = metadata->height;
+        mRapi->UploadCompressedTexture(addr, width, height, compressedFormat, compressedMipCount);
+        return;
+    }
+#endif
+
+    if (addr == nullptr) {
+        addr = importReplacement && (metadata->resource != nullptr)
+                   ? mMaskedTextures.find(GetBaseTexturePath(metadata->resource->GetInitData()->Path))
+                         ->second.replacementData
+                   : mRdp->loaded_texture[mRdp->texture_tile[tile].tmem_index].addr;
+    }
 
     if (addr == nullptr) {
         SPDLOG_ERROR("ImportTextureImg: null texture address for tile {}", tile);
@@ -4557,6 +4595,11 @@ void Interpreter::Init(class GfxWindowBackend* wapi, class GfxRenderingAPI* rapi
     mRapi = rapi;
     mWapi->Init(game_name, rapi->GetName(), start_in_fullscreen, width, height, posX, posY);
     mRapi->Init();
+
+#ifdef INCLUDE_KTX_SUPPORT
+    SetKtxPreferredFormat(mRapi->GetPreferredCompressedFormat());
+#endif
+
     mRapi->UpdateFramebufferParameters(0, width, height, 1, false, true, true, true);
     mCurDimensions.internal_mul =
         Ship::Context::GetInstance()->GetConsoleVariables()->GetFloat(CVAR_INTERNAL_RESOLUTION, 1);

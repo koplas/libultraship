@@ -350,6 +350,67 @@ void GfxRenderingAPIMetal::UploadTexture(const uint8_t* rgba32_buf, uint32_t wid
     autorelease_pool->release();
 }
 
+GfxCompressedTexFormat GfxRenderingAPIMetal::GetPreferredCompressedFormat() const {
+#if TARGET_OS_IOS || TARGET_OS_TV
+    return GfxCompressedTexFormat::ASTC_4x4;
+#else
+    return GfxCompressedTexFormat::BC7_UNORM;
+#endif
+}
+
+void GfxRenderingAPIMetal::UploadCompressedTexture(const uint8_t* data, uint32_t width, uint32_t height,
+                                                   GfxCompressedTexFormat format, uint32_t mipCount) {
+    MTL::PixelFormat pixelFormat;
+    NS::UInteger blockSize;
+    switch (format) {
+        case GfxCompressedTexFormat::BC3_UNORM:
+            pixelFormat = MTL::PixelFormatBC3_RGBA;
+            blockSize = 16;
+            break;
+        case GfxCompressedTexFormat::BC7_UNORM:
+            pixelFormat = MTL::PixelFormatBC7_RGBAUnorm;
+            blockSize = 16;
+            break;
+        case GfxCompressedTexFormat::ASTC_4x4:
+            pixelFormat = MTL::PixelFormatASTC_4x4_LDR;
+            blockSize = 16;
+            break;
+        default:
+            return;
+    }
+
+    TextureDataMetal* texture_data = &mTextures[mCurrentTextureIds[mCurrentTile]];
+
+    NS::AutoreleasePool* autorelease_pool = NS::AutoreleasePool::alloc()->init();
+
+    MTL::TextureDescriptor* descriptor = MTL::TextureDescriptor::texture2DDescriptor(pixelFormat, width, height, false);
+    descriptor->setMipmapLevelCount(static_cast<NS::UInteger>(mipCount));
+    descriptor->setStorageMode(MTL::StorageModeShared);
+
+    if (texture_data->texture != nullptr) {
+        texture_data->texture->release();
+    }
+    MTL::Texture* texture = mDevice->newTexture(descriptor);
+
+    // Upload each mip level.
+    const uint8_t* levelData = data;
+    for (uint32_t level = 0; level < mipCount; ++level) {
+        const NS::UInteger mipWidth = std::max(1u, width >> level);
+        const NS::UInteger mipHeight = std::max(1u, height >> level);
+        const NS::UInteger bytesPerRow = ((mipWidth + 3) / 4) * blockSize;
+        const NS::UInteger levelSize = ((mipHeight + 3) / 4) * bytesPerRow;
+        MTL::Region region = MTL::Region::Make2D(0, 0, mipWidth, mipHeight);
+        texture->replaceRegion(region, static_cast<NS::UInteger>(level), levelData, bytesPerRow);
+        levelData += levelSize;
+    }
+
+    texture_data->texture = texture;
+    texture_data->width = width;
+    texture_data->height = height;
+
+    autorelease_pool->release();
+}
+
 void GfxRenderingAPIMetal::SetSamplerParameters(int tile, bool linear_filter, uint32_t cms, uint32_t cmt) {
     TextureDataMetal* texture_data = &mTextures[mCurrentTextureIds[tile]];
     texture_data->linear_filtering = linear_filter;

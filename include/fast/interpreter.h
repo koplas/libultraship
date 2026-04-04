@@ -357,6 +357,11 @@ struct FBInfo {
 struct MaskedTextureEntry {
     uint8_t* mask;
     uint8_t* replacementData;
+#ifdef INCLUDE_KTX_SUPPORT
+    // All mip levels are stored consecutively in replacementData (level 0 first).
+    uint32_t compressedMipCount = 1;
+    GfxCompressedTexFormat compressedFormat = GfxCompressedTexFormat::None;
+#endif
 };
 
 class Interpreter {
