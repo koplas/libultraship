@@ -357,6 +357,18 @@ struct FBInfo {
 struct MaskedTextureEntry {
     uint8_t* mask;
     uint8_t* replacementData;
+    // Owning reference to the Texture resource whose ImageData backs replacementData.
+    // Prevents the resource (and its ImageData allocation) from being freed by the
+    // ResourceManager while this entry is live. Without this, replacementData and
+    // any cache keys derived from it become dangling pointers after resource eviction.
+    std::shared_ptr<Fast::Texture> replacementResource;
+#ifdef INCLUDE_KTX_SUPPORT
+    // Set when replacementData holds GPU-native block-compressed data
+    // (transcoded from KTX2).
+    // All mip levels are stored consecutively in replacementData (level 0 first).
+    uint32_t compressedMipCount = 1;
+    GfxCompressedTexFormat compressedFormat = GfxCompressedTexFormat::None;
+#endif
 };
 
 class Interpreter {
@@ -388,6 +400,12 @@ class Interpreter {
     void GetPixelDepthPrepare(float x, float y);
     uint16_t GetPixelDepth(float x, float y);
     void RegisterBlendedTexture(const char* name, uint8_t* mask, uint8_t* replacement);
+#ifdef INCLUDE_KTX_SUPPORT
+    // Transcodes a KtxRaw texture resource to the preferred GPU-native compressed format
+    // in-place (replaces texRes->ImageData) and populates the relevant MaskedTextureEntry fields.
+    // Returns true on success.
+    bool TranscodeKtxTexture(Fast::Texture* texRes, MaskedTextureEntry& entry);
+#endif
     void UnregisterBlendedTexture(const char* name);
 
     void SetNativeDimensions(float width, float height);

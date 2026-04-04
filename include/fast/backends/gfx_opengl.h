@@ -69,6 +69,9 @@ class GfxRenderingAPIOGL final : public GfxRenderingAPI {
     uint32_t NewTexture() override;
     void SelectTexture(int tile, uint32_t textureId) override;
     void UploadTexture(const uint8_t* rgba32Buf, uint32_t width, uint32_t height) override;
+    GfxCompressedTexFormat GetPreferredCompressedFormat() const override;
+    void UploadCompressedTexture(const uint8_t* data, uint32_t width, uint32_t height, GfxCompressedTexFormat format,
+                                 uint32_t mipCount = 1) override;
     void SetSamplerParameters(int sampler, bool linear_filter, uint32_t cms, uint32_t cmt) override;
     void SetDepthTestAndMask(bool depth_test, bool z_upd) override;
     void SetZmodeDecal(bool decal) override;
@@ -134,6 +137,8 @@ class GfxRenderingAPIOGL final : public GfxRenderingAPI {
     GLuint mPixelDepthRb = 0;
     GLuint mPixelDepthFb = 0;
     size_t mPixelDepthRbSize = 0;
+
+    GfxCompressedTexFormat mPreferredCompressedFormat = GfxCompressedTexFormat::None;
 };
 
 } // namespace Fast
