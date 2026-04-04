@@ -25,6 +25,9 @@
 #include <string>
 
 #include "fast/interpreter.h"
+#ifdef INCLUDE_KTX_SUPPORT
+#include "fast/resource/factory/TextureFactory.h"
+#endif
 #include "fast/lus_gbi.h"
 #include "fast/backends/gfx_window_manager_api.h"
 #include "fast/backends/gfx_rendering_api.h"
@@ -49,11 +52,11 @@ std::stack<std::string> currentDir;
 #define SUPPORT_CHECK(x) assert(x)
 
 // SCALE_M_N: upscale/downscale M-bit integer to N-bit
-#define SCALE_5_8(VAL_) (((VAL_)*0xFF) / 0x1F)
+#define SCALE_5_8(VAL_) (((VAL_) * 0xFF) / 0x1F)
 #define SCALE_8_5(VAL_) ((((VAL_) + 4) * 0x1F) / 0xFF)
-#define SCALE_4_8(VAL_) ((VAL_)*0x11)
+#define SCALE_4_8(VAL_) ((VAL_) * 0x11)
 #define SCALE_8_4(VAL_) ((VAL_) / 0x11)
-#define SCALE_3_8(VAL_) ((VAL_)*0x24)
+#define SCALE_3_8(VAL_) ((VAL_) * 0x24)
 #define SCALE_8_3(VAL_) ((VAL_) / 0x24)
 
 // Based off the current set native dimensions or active framebuffer
@@ -1020,11 +1023,62 @@ void Interpreter::ImportTextureCi8(int tile, bool importReplacement) {
     mRapi->UploadTexture(mTexUploadBuffer, width, height);
 }
 
-void Interpreter::ImportTextureImg(int tile, bool importReplacement) {
+void Interpreter::ImportTextureImg(int i, int tile, bool importReplacement) {
     const RawTexMetadata* metadata = &mRdp->loaded_texture[mRdp->texture_tile[tile].tmem_index].raw_tex_metadata;
-    const uint8_t* addr = importReplacement && (!metadata->path.empty())
-                              ? mMaskedTextures.find(GetBaseTexturePath(metadata->path))->second.replacementData
-                              : mRdp->loaded_texture[mRdp->texture_tile[tile].tmem_index].addr;
+    const uint8_t* addr = nullptr;
+
+#ifdef INCLUDE_KTX_SUPPORT
+    GfxCompressedTexFormat compressedFormat = GfxCompressedTexFormat::None;
+    uint32_t compressedMipCount = 1;
+
+    if (importReplacement && (!metadata->path.empty())) {
+        auto it = mMaskedTextures.find(GetBaseTexturePath(metadata->path));
+        if (it != mMaskedTextures.end()) {
+            addr = it->second.replacementData;
+            compressedFormat = it->second.compressedFormat;
+            compressedMipCount = it->second.compressedMipCount;
+        }
+    } else if (metadata->resource.valid()) {
+        auto resource = std::static_pointer_cast<Fast::Texture>(metadata->resource.get());
+        if (resource->CompressedFormat != GfxCompressedTexFormat::None) {
+            addr = resource->ImageData;
+            compressedFormat = resource->CompressedFormat;
+            compressedMipCount = resource->CompressedMipCount;
+        }
+    }
+
+    if (compressedFormat != GfxCompressedTexFormat::None) {
+        if (addr == nullptr) {
+            SPDLOG_ERROR("ImportTextureImg: null compressed texture address for tile {}", tile);
+            return;
+        }
+        uint16_t width = metadata->width;
+        uint16_t height = metadata->height;
+        mRapi->UploadCompressedTexture(addr, width, height, compressedFormat, compressedMipCount);
+
+        if (!metadata->load_params.is_block) {
+            uint32_t tile_w = ((metadata->load_params.lrs - metadata->load_params.uls) >> G_TEXTURE_IMAGE_FRAC) + 1;
+            uint32_t tile_h = ((metadata->load_params.lrt - metadata->load_params.ult) >> G_TEXTURE_IMAGE_FRAC) + 1;
+            if (tile_w < width || tile_h < height) {
+                TextureCacheNode* node = mRenderingState.mTextures[i];
+                if (node != nullptr) {
+                    node->second.compressed_subregion = true;
+                    node->second.uv_offset_u = (float)(metadata->load_params.uls >> G_TEXTURE_IMAGE_FRAC);
+                    node->second.uv_offset_v = (float)(metadata->load_params.ult >> G_TEXTURE_IMAGE_FRAC);
+                    SPDLOG_TRACE("KTX sub-region: i={} tile={} offset_u={} offset_v={}",
+                                 i, tile, node->second.uv_offset_u, node->second.uv_offset_v);
+                }
+            }
+        }
+        return;
+    }
+#endif
+
+    if (addr == nullptr) {
+        addr = importReplacement && (!metadata->path.empty())
+                   ? mMaskedTextures.find(GetBaseTexturePath(metadata->path))->second.replacementData
+                   : mRdp->loaded_texture[mRdp->texture_tile[tile].tmem_index].addr;
+    }
 
     if (addr == nullptr) {
         return;
@@ -1344,7 +1398,7 @@ void Interpreter::ProcessImportInternal(int i, int tile, bool importReplacement,
     }
 
     if ((texFlags & TEX_FLAG_LOAD_AS_IMG) != 0) {
-        ImportTextureImg(tile, importReplacement);
+        ImportTextureImg(i, tile, importReplacement);
         restore();
         return;
     }
@@ -1623,7 +1677,7 @@ void Interpreter::GfxSpVertex(size_t n_vertices, size_t dest_index, const F3DVtx
 
         float world_pos[3] = { 0.0 };
         if (mRsp->geometry_mode & G_LIGHTING_POSITIONAL) {
-            float(*mtx)[4] = mRsp->modelview_matrix_stack[mRsp->modelview_matrix_stack_size - 1];
+            float (*mtx)[4] = mRsp->modelview_matrix_stack[mRsp->modelview_matrix_stack_size - 1];
             world_pos[0] = v->ob[0] * mtx[0][0] + v->ob[1] * mtx[1][0] + v->ob[2] * mtx[2][0] + mtx[3][0];
             world_pos[1] = v->ob[0] * mtx[0][1] + v->ob[1] * mtx[1][1] + v->ob[2] * mtx[2][1] + mtx[3][1];
             world_pos[2] = v->ob[0] * mtx[0][2] + v->ob[1] * mtx[1][2] + v->ob[2] * mtx[2][2] + mtx[3][2];
@@ -2149,6 +2203,26 @@ void Interpreter::GfxSpTri1(uint8_t vtx1_idx, uint8_t vtx2_idx, uint8_t vtx3_idx
 
             mBufVbo[mBufVboLen++] = u / tex_width[t];
             mBufVbo[mBufVboLen++] = v / tex_height[t];
+
+#ifdef INCLUDE_KTX_SUPPORT
+            if (mRenderingState.mTextures[t] != nullptr && mRenderingState.mTextures[t]->second.compressed_subregion) {
+                auto& sub = mRenderingState.mTextures[t]->second;
+                auto* meta = &mRdp->loaded_texture[mRdp->texture_tile[effective_tile[t]].tmem_index].raw_tex_metadata;
+                float n64_width = (float)meta->load_params.width;
+                float h_scale = (float)meta->width / n64_width;
+                float n64_height = (float)meta->height / h_scale;
+                float u_full = (u + sub.uv_offset_u) / n64_width;
+                float v_full = (v + sub.uv_offset_v) / n64_height;
+                mBufVbo[mBufVboLen - 2] = u_full;
+                mBufVbo[mBufVboLen - 1] = v_full;
+                SPDLOG_TRACE("KTX UV remap: t={} tex_w={} tex_h={} ktx={}x{} n64={}x{} "
+                             "u=[{:.3f}->{:.5f}] v=[{:.3f}->{:.5f}] off_u={:.0f} off_v={:.0f}",
+                             t, tex_width[t], tex_height[t], meta->width, meta->height,
+                             n64_width, n64_height,
+                             u / tex_width[t], u_full, v / tex_height[t], v_full,
+                             sub.uv_offset_u, sub.uv_offset_v);
+            }
+#endif
 
             bool clampS = tm & (1 << 2 * t);
             bool clampT = tm & (1 << 2 * t + 1);
@@ -4813,6 +4887,11 @@ void Interpreter::Init(class GfxWindowBackend* wapi, class GfxRenderingAPI* rapi
     mRapi = rapi;
     mWapi->Init(game_name, rapi->GetName(), start_in_fullscreen, width, height, posX, posY);
     mRapi->Init();
+
+#ifdef INCLUDE_KTX_SUPPORT
+    SetKtxPreferredFormat(mRapi->GetPreferredCompressedFormat());
+#endif
+
     mRapi->UpdateFramebufferParameters(0, width, height, 1, false, true, true, true);
     mCurDimensions.internal_mul =
         Ship::Context::GetInstance()->GetConsoleVariables()->GetFloat(CVAR_INTERNAL_RESOLUTION, 1);

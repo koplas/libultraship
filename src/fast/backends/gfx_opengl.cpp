@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 
+#include <algorithm>
 #include <map>
 #include <unordered_map>
 
@@ -730,6 +731,80 @@ void GfxRenderingAPIOGL::Init() {
     mPixelDepthRbSize = 1;
 
     glGetIntegerv(GL_MAX_SAMPLES, &mMaxMsaaLevel);
+
+#ifdef USE_OPENGLES
+    // ETC2 RGBA is a core format in OpenGL ES 3.0+.
+    mPreferredCompressedFormat = GfxCompressedTexFormat::ETC2_RGBA8;
+#else
+    // Probe for BC7 (BPTC) then BC3 (S3TC/DXT) on desktop OpenGL.
+    GLint numExtensions = 0;
+    glGetIntegerv(GL_NUM_EXTENSIONS, &numExtensions);
+    for (GLint i = 0; i < numExtensions; i++) {
+        const char* ext = reinterpret_cast<const char*>(glGetStringi(GL_EXTENSIONS, i));
+        if (ext == nullptr) {
+            continue;
+        }
+        if (strcmp(ext, "GL_ARB_texture_compression_bptc") == 0 ||
+            strcmp(ext, "GL_EXT_texture_compression_bptc") == 0) {
+            mPreferredCompressedFormat = GfxCompressedTexFormat::BC7_UNORM;
+            break;
+        }
+        if (mPreferredCompressedFormat == GfxCompressedTexFormat::None &&
+            (strcmp(ext, "GL_EXT_texture_compression_s3tc") == 0 ||
+             strcmp(ext, "GL_NV_texture_compression_s3tc") == 0)) {
+            mPreferredCompressedFormat = GfxCompressedTexFormat::BC3_UNORM;
+            // Don't break – keep looking for BC7.
+        }
+    }
+#endif
+}
+
+GfxCompressedTexFormat GfxRenderingAPIOGL::GetPreferredCompressedFormat() const {
+    return mPreferredCompressedFormat;
+}
+
+// GL constants that may not be defined by older SDK headers.
+#ifndef GL_COMPRESSED_RGBA_BPTC_UNORM
+#define GL_COMPRESSED_RGBA_BPTC_UNORM 0x8E8C
+#endif
+#ifndef GL_COMPRESSED_RGBA_S3TC_DXT5_EXT
+#define GL_COMPRESSED_RGBA_S3TC_DXT5_EXT 0x83F3
+#endif
+#ifndef GL_COMPRESSED_RGBA8_ETC2_EAC
+#define GL_COMPRESSED_RGBA8_ETC2_EAC 0x9278
+#endif
+
+void GfxRenderingAPIOGL::UploadCompressedTexture(const uint8_t* data, uint32_t width, uint32_t height,
+                                                 GfxCompressedTexFormat format, uint32_t mipCount) {
+    GLenum glFormat;
+    switch (format) {
+        case GfxCompressedTexFormat::BC3_UNORM:
+            glFormat = GL_COMPRESSED_RGBA_S3TC_DXT5_EXT;
+            break;
+        case GfxCompressedTexFormat::BC7_UNORM:
+            glFormat = GL_COMPRESSED_RGBA_BPTC_UNORM;
+            break;
+        case GfxCompressedTexFormat::ETC2_RGBA8:
+            glFormat = GL_COMPRESSED_RGBA8_ETC2_EAC;
+            break;
+        default:
+            return;
+    }
+
+    // All supported formats use 16 bytes per 4×4 block.
+    constexpr uint32_t kBlockSize = 16;
+
+    const uint8_t* levelData = data;
+    for (uint32_t level = 0; level < mipCount; ++level) {
+        const uint32_t mipWidth = std::max(1u, width >> level);
+        const uint32_t mipHeight = std::max(1u, height >> level);
+        const uint32_t levelSize = ((mipWidth + 3) / 4) * ((mipHeight + 3) / 4) * kBlockSize;
+        glCompressedTexImage2D(GL_TEXTURE_2D, static_cast<GLint>(level), glFormat, static_cast<GLsizei>(mipWidth),
+                               static_cast<GLsizei>(mipHeight), 0, static_cast<GLsizei>(levelSize), levelData);
+        levelData += levelSize;
+    }
+    textures[mCurrentTextureIds[mCurrentTile]].width = static_cast<uint16_t>(width);
+    textures[mCurrentTextureIds[mCurrentTile]].height = static_cast<uint16_t>(height);
 }
 
 void GfxRenderingAPIOGL::OnResize() {

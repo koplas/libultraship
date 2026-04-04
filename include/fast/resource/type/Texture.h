@@ -3,6 +3,9 @@
 #include "ship/resource/Resource.h"
 #include <memory>
 #include <vector>
+#ifdef INCLUDE_KTX_SUPPORT
+#include "fast/backends/gfx_rendering_api.h"
+#endif
 
 #define TEX_FLAG_LOAD_AS_RAW (1 << 0)
 #define TEX_FLAG_LOAD_AS_IMG (1 << 1)
@@ -19,6 +22,7 @@ enum class TextureType {
     GrayscaleAlpha4bpp = 7,
     GrayscaleAlpha8bpp = 8,
     GrayscaleAlpha16bpp = 9,
+    KtxRaw = 10,
 };
 
 class Texture final : public Ship::Resource<uint8_t> {
@@ -37,8 +41,11 @@ class Texture final : public Ship::Resource<uint8_t> {
     float VPixelScale = 1.0;
     uint32_t ImageDataSize;
     uint8_t* ImageData = nullptr;
-    // When set, ImageData points into this buffer and must not be delete[]-ed.
     std::shared_ptr<std::vector<char>> mImageBuffer;
+#ifdef INCLUDE_KTX_SUPPORT
+    GfxCompressedTexFormat CompressedFormat = GfxCompressedTexFormat::None;
+    uint32_t CompressedMipCount = 1;
+#endif
 
     ~Texture();
 };

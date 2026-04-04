@@ -201,6 +201,12 @@ struct TextureCacheValue {
     bool linear_filter;
 
     std::list<struct TextureCacheMapIter>::iterator lru_location;
+
+#ifdef INCLUDE_KTX_SUPPORT
+    bool compressed_subregion = false;
+    float uv_offset_u = 0.0f;
+    float uv_offset_v = 0.0f;
+#endif
 };
 
 struct TextureCacheMapIter {
@@ -366,6 +372,10 @@ struct MaskedTextureEntry {
     uint8_t* mask;
     uint8_t* replacementData;
     std::shared_future<std::shared_ptr<Ship::IResource>> replacementResource;
+#ifdef INCLUDE_KTX_SUPPORT
+    uint32_t compressedMipCount = 1;
+    GfxCompressedTexFormat compressedFormat = GfxCompressedTexFormat::None;
+#endif
 };
 
 class Interpreter {
@@ -434,7 +444,7 @@ class Interpreter {
     void ImportTextureCi4(int tile, bool importReplacement);
     void ImportTextureCi8(int tile, bool importReplacement);
     void ImportTextureRaw(int tile, bool importReplacement);
-    void ImportTextureImg(int tile, bool importReplacement);
+    void ImportTextureImg(int i, int tile, bool importReplacement);
     void ImportTexture(int i, int tile, bool importReplacement);
     void ImportTextureMask(int i, int tile);
     void CalculateNormalDir(const F3DLight_t*, float coeffs[3]);

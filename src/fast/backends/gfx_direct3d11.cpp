@@ -1,5 +1,6 @@
 #ifdef ENABLE_DX11
 
+#include <algorithm>
 #include <cstdio>
 #include <vector>
 #include <cmath>
@@ -586,6 +587,64 @@ void GfxRenderingAPIDX11::UploadTexture(const uint8_t* rgba32_buf, uint32_t widt
 
     // Create shader resource view from texture
 
+    ThrowIfFailed(mDevice->CreateShaderResourceView(texture_data->texture.Get(), nullptr,
+                                                    texture_data->resource_view.ReleaseAndGetAddressOf()));
+}
+
+GfxCompressedTexFormat GfxRenderingAPIDX11::GetPreferredCompressedFormat() const {
+    // D3D11 feature level 11.0 (required by this backend) always supports BC7.
+    return GfxCompressedTexFormat::BC7_UNORM;
+}
+
+void GfxRenderingAPIDX11::UploadCompressedTexture(const uint8_t* data, uint32_t width, uint32_t height,
+                                                  GfxCompressedTexFormat format, uint32_t mipCount) {
+    DXGI_FORMAT dxgiFormat;
+    uint32_t blockSize;
+    switch (format) {
+        case GfxCompressedTexFormat::BC3_UNORM:
+            dxgiFormat = DXGI_FORMAT_BC3_UNORM;
+            blockSize = 16;
+            break;
+        case GfxCompressedTexFormat::BC7_UNORM:
+            dxgiFormat = DXGI_FORMAT_BC7_UNORM;
+            blockSize = 16;
+            break;
+        default:
+            return;
+    }
+
+    TextureData* texture_data = &mTextures[mCurrentTextureIds[mCurrentTile]];
+    texture_data->width = width;
+    texture_data->height = height;
+
+    D3D11_TEXTURE2D_DESC texture_desc;
+    ZeroMemory(&texture_desc, sizeof(D3D11_TEXTURE2D_DESC));
+    texture_desc.Width = width;
+    texture_desc.Height = height;
+    texture_desc.Usage = D3D11_USAGE_IMMUTABLE;
+    texture_desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+    texture_desc.Format = dxgiFormat;
+    texture_desc.ArraySize = 1;
+    texture_desc.MipLevels = mipCount;
+    texture_desc.SampleDesc.Count = 1;
+    texture_desc.SampleDesc.Quality = 0;
+
+    // Build one D3D11_SUBRESOURCE_DATA per mip level.
+    std::vector<D3D11_SUBRESOURCE_DATA> subresources(mipCount);
+    const uint8_t* levelData = data;
+    for (uint32_t level = 0; level < mipCount; ++level) {
+        const uint32_t mipWidth = std::max(1u, width >> level);
+        const uint32_t mipHeight = std::max(1u, height >> level);
+        const uint32_t rowPitch = ((mipWidth + 3) / 4) * blockSize;
+        const uint32_t levelSize = ((mipHeight + 3) / 4) * rowPitch;
+        subresources[level].pSysMem = levelData;
+        subresources[level].SysMemPitch = rowPitch;
+        subresources[level].SysMemSlicePitch = levelSize;
+        levelData += levelSize;
+    }
+
+    ThrowIfFailed(
+        mDevice->CreateTexture2D(&texture_desc, subresources.data(), texture_data->texture.ReleaseAndGetAddressOf()));
     ThrowIfFailed(mDevice->CreateShaderResourceView(texture_data->texture.Get(), nullptr,
                                                     texture_data->resource_view.ReleaseAndGetAddressOf()));
 }

@@ -103,6 +103,28 @@ FetchContent_MakeAvailable(ThreadPool)
 
 list(APPEND ADDITIONAL_LIB_INCLUDES ${threadpool_SOURCE_DIR}/include)
 
+#=================== libktx ===================
+option(INCLUDE_KTX_SUPPORT "Enable KTX texture support for texture replacement packs" ON)
+
+if(INCLUDE_KTX_SUPPORT)
+    set(KTX_FEATURE_STATIC_LIBRARY ON CACHE BOOL "" FORCE)
+    set(KTX_FEATURE_TESTS OFF CACHE BOOL "" FORCE)
+    set(KTX_FEATURE_TOOLS OFF CACHE BOOL "" FORCE)
+    set(KTX_FEATURE_GL_UPLOAD OFF CACHE BOOL "" FORCE)
+    set(KTX_FEATURE_VK_UPLOAD OFF CACHE BOOL "" FORCE)
+    set(KTX_FEATURE_WRITE OFF CACHE BOOL "" FORCE)
+    set(KTX_FEATURE_DOC OFF CACHE BOOL "" FORCE)
+    set(KTX_FEATURE_LOADTEST_APPS OFF CACHE BOOL "" FORCE)
+
+    FetchContent_Declare(
+        ktx
+        GIT_REPOSITORY https://github.com/KhronosGroup/KTX-Software.git
+        GIT_TAG v4.4.2
+    )
+    FetchContent_MakeAvailable(ktx)
+    list(APPEND ADDITIONAL_LIB_INCLUDES ${ktx_SOURCE_DIR}/include)
+endif()
+
 #=========== prism ===========
 option(PRISM_STANDALONE "Build prism as a standalone library" OFF)
 FetchContent_Declare(
