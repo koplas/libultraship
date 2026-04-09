@@ -152,6 +152,7 @@ std::shared_ptr<IResource> ResourceManager::LoadResourceProcess(const ResourceId
     auto file = LoadFileProcess(identifier.Path);
     if (file == nullptr) {
         SPDLOG_TRACE("Failed to load resource file at path {}", identifier.Path);
+        const std::lock_guard<std::mutex> lock(mMutex);
         mResourceCache[identifier] = ResourceLoadError::NotFound;
         return nullptr;
     }
@@ -200,7 +201,7 @@ ResourceManager::LoadResourceAsync(const ResourceIdentifier& identifier, bool lo
     // Check for and remove the OTR signature
     if (OtrSignatureCheck(identifier.Path.c_str())) {
         auto newFilePath = identifier.Path.substr(7);
-        return LoadResourceAsync({ newFilePath, identifier.Owner, identifier.Parent }, loadExact, priority);
+        return LoadResourceAsync({ newFilePath, identifier.Owner, identifier.Parent }, loadExact, priority, initData);
     }
 
     // Check the cache before queueing the job.
@@ -211,11 +212,25 @@ ResourceManager::LoadResourceAsync(const ResourceIdentifier& identifier, bool lo
         return promise->get_future().share();
     }
 
-    return mThreadPool->submit_task(
-        [this, identifier, loadExact, initData]() -> std::shared_ptr<IResource> {
-            return LoadResourceProcess(identifier, loadExact, initData);
-        },
-        priority);
+    const std::lock_guard<std::mutex> lock(mMutex);
+    if (mInFlightRequests.contains(identifier)) {
+        return mInFlightRequests[identifier];
+    }
+
+    auto future = mThreadPool
+                      ->submit_task(
+                          [this, identifier, loadExact, initData]() -> std::shared_ptr<IResource> {
+                              auto res = LoadResourceProcess(identifier, loadExact, initData);
+                              const std::lock_guard<std::mutex> lock(mMutex);
+                              mInFlightRequests.erase(identifier);
+                              return res;
+                          },
+                          priority)
+                      .share();
+
+    mInFlightRequests[identifier] = future;
+
+    return future;
 }
 
 std::shared_future<std::shared_ptr<IResource>>
@@ -226,6 +241,10 @@ ResourceManager::LoadResourceAsync(const std::string& filePath, bool loadExact, 
 
 std::shared_ptr<IResource> ResourceManager::LoadResource(const ResourceIdentifier& identifier, bool loadExact,
                                                          std::shared_ptr<ResourceInitData> initData) {
+    if (mThreadPool->is_paused()) {
+        return LoadResourceProcess(identifier, loadExact, initData);
+    }
+
     auto resource = LoadResourceAsync(identifier, loadExact, BS::pr::highest, initData).get();
     if (resource == nullptr) {
         SPDLOG_TRACE("Failed to load resource file at path {}", identifier.Path);
@@ -345,6 +364,10 @@ std::shared_ptr<std::vector<std::shared_ptr<IResource>>> ResourceManager::LoadRe
 }
 
 std::shared_ptr<std::vector<std::shared_ptr<IResource>>> ResourceManager::LoadResources(const ResourceFilter& filter) {
+    if (mThreadPool->is_paused()) {
+        return LoadResourcesProcess(filter);
+    }
+
     return LoadResourcesAsync(filter, BS::pr::highest).get();
 }
 
@@ -413,6 +436,20 @@ size_t ResourceManager::UnloadResource(const ResourceIdentifier& identifier) {
     }
 
     return ret;
+}
+
+std::shared_future<std::shared_ptr<IResource>>
+ResourceManager::LoadResourceAsync(uint64_t crc, bool loadExact, BS::priority_t priority,
+                                   std::shared_ptr<ResourceInitData> initData) {
+    const std::string* hashStr = GetArchiveManager()->HashToString(crc);
+    if (hashStr == nullptr || hashStr->length() == 0) {
+        SPDLOG_TRACE("ResourceLoadAsync: Unknown crc {}\n", crc);
+        auto promise = std::make_shared<std::promise<std::shared_ptr<IResource>>>();
+        promise->set_value(nullptr);
+        return promise->get_future().share();
+    }
+
+    return LoadResourceAsync(*hashStr, loadExact, priority, initData);
 }
 
 size_t ResourceManager::UnloadResource(const std::string& filePath) {

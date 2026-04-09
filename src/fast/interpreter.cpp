@@ -554,6 +554,12 @@ void Interpreter::ImportTextureRgba16(int tile, bool importReplacement) {
         fullImageLineSizeBytes = width * 2;
     }
 
+    uint8_t* dest = mRapi->LockTextureStagingBuffer(width, height);
+    bool isZeroCopy = (dest != nullptr);
+    if (!isZeroCopy) {
+        dest = mTexUploadBuffer;
+    }
+
     uint32_t i = 0;
 
     for (uint32_t y = 0; y < height; y++) {
@@ -565,16 +571,20 @@ void Interpreter::ImportTextureRgba16(int tile, bool importReplacement) {
             uint8_t r = col16 >> 11;
             uint8_t g = (col16 >> 6) & 0x1f;
             uint8_t b = (col16 >> 1) & 0x1f;
-            mTexUploadBuffer[4 * i + 0] = SCALE_5_8(r);
-            mTexUploadBuffer[4 * i + 1] = SCALE_5_8(g);
-            mTexUploadBuffer[4 * i + 2] = SCALE_5_8(b);
-            mTexUploadBuffer[4 * i + 3] = a ? 255 : 0;
+            dest[4 * i + 0] = SCALE_5_8(r);
+            dest[4 * i + 1] = SCALE_5_8(g);
+            dest[4 * i + 2] = SCALE_5_8(b);
+            dest[4 * i + 3] = a ? 255 : 0;
 
             i++;
         }
     }
 
-    mRapi->UploadTexture(mTexUploadBuffer, width, height);
+    if (isZeroCopy) {
+        mRapi->UnlockTextureStagingBuffer();
+    } else {
+        mRapi->UploadTexture(mTexUploadBuffer, width, height);
+    }
 }
 
 void Interpreter::ImportTextureRgba32(int tile, bool importReplacement) {
@@ -613,20 +623,31 @@ void Interpreter::ImportTextureRgba32(int tile, bool importReplacement) {
         full_image_line_size_bytes = width * 4;
     }
 
+    uint8_t* dest = mRapi->LockTextureStagingBuffer(width, height);
+    bool isZeroCopy = (dest != nullptr);
+    if (!isZeroCopy) {
+        dest = mTexUploadBuffer;
+    }
+
     // Copy pixel by pixel, respecting full image stride (handles sub-tile loads)
     uint32_t fullImageStridePixels = full_image_line_size_bytes / 4;
     uint32_t i = 0;
     for (uint32_t y = 0; y < height; y++) {
         for (uint32_t x = 0; x < width; x++) {
             uint32_t srcIdx = y * fullImageStridePixels + x;
-            mTexUploadBuffer[4 * i + 0] = addr[4 * srcIdx + 0];
-            mTexUploadBuffer[4 * i + 1] = addr[4 * srcIdx + 1];
-            mTexUploadBuffer[4 * i + 2] = addr[4 * srcIdx + 2];
-            mTexUploadBuffer[4 * i + 3] = addr[4 * srcIdx + 3];
+            dest[4 * i + 0] = addr[4 * srcIdx + 0];
+            dest[4 * i + 1] = addr[4 * srcIdx + 1];
+            dest[4 * i + 2] = addr[4 * srcIdx + 2];
+            dest[4 * i + 3] = addr[4 * srcIdx + 3];
             i++;
         }
     }
-    mRapi->UploadTexture(mTexUploadBuffer, width, height);
+
+    if (isZeroCopy) {
+        mRapi->UnlockTextureStagingBuffer();
+    } else {
+        mRapi->UploadTexture(mTexUploadBuffer, width, height);
+    }
 }
 
 void Interpreter::ImportTextureIA4(int tile, bool importReplacement) {
@@ -655,6 +676,12 @@ void Interpreter::ImportTextureIA4(int tile, bool importReplacement) {
         fullImageLineSizeBytes = widthBytes;
     }
 
+    uint8_t* dest = mRapi->LockTextureStagingBuffer(width, height);
+    bool isZeroCopy = (dest != nullptr);
+    if (!isZeroCopy) {
+        dest = mTexUploadBuffer;
+    }
+
     uint32_t i = 0;
     for (uint32_t y = 0; y < height; y++) {
         for (uint32_t x = 0; x < width; x++) {
@@ -663,15 +690,19 @@ void Interpreter::ImportTextureIA4(int tile, bool importReplacement) {
             uint8_t part = (byte >> (4 - (srcPixelIdx % 2) * 4)) & 0xf;
             uint8_t intensity = part >> 1;
             uint8_t alpha = part & 1;
-            mTexUploadBuffer[4 * i + 0] = SCALE_3_8(intensity);
-            mTexUploadBuffer[4 * i + 1] = SCALE_3_8(intensity);
-            mTexUploadBuffer[4 * i + 2] = SCALE_3_8(intensity);
-            mTexUploadBuffer[4 * i + 3] = alpha ? 255 : 0;
+            dest[4 * i + 0] = SCALE_3_8(intensity);
+            dest[4 * i + 1] = SCALE_3_8(intensity);
+            dest[4 * i + 2] = SCALE_3_8(intensity);
+            dest[4 * i + 3] = alpha ? 255 : 0;
             i++;
         }
     }
 
-    mRapi->UploadTexture(mTexUploadBuffer, width, height);
+    if (isZeroCopy) {
+        mRapi->UnlockTextureStagingBuffer();
+    } else {
+        mRapi->UploadTexture(mTexUploadBuffer, width, height);
+    }
 }
 
 void Interpreter::ImportTextureIA8(int tile, bool importReplacement) {
@@ -699,21 +730,31 @@ void Interpreter::ImportTextureIA8(int tile, bool importReplacement) {
         fullImageLineSizeBytes = width;
     }
 
+    uint8_t* dest = mRapi->LockTextureStagingBuffer(width, height);
+    bool isZeroCopy = (dest != nullptr);
+    if (!isZeroCopy) {
+        dest = mTexUploadBuffer;
+    }
+
     uint32_t i = 0;
     for (uint32_t y = 0; y < height; y++) {
         for (uint32_t x = 0; x < width; x++) {
             uint32_t srcIdx = y * fullImageLineSizeBytes + x;
             uint8_t intensity = addr[srcIdx] >> 4;
             uint8_t alpha = addr[srcIdx] & 0xf;
-            mTexUploadBuffer[4 * i + 0] = SCALE_4_8(intensity);
-            mTexUploadBuffer[4 * i + 1] = SCALE_4_8(intensity);
-            mTexUploadBuffer[4 * i + 2] = SCALE_4_8(intensity);
-            mTexUploadBuffer[4 * i + 3] = SCALE_4_8(alpha);
+            dest[4 * i + 0] = SCALE_4_8(intensity);
+            dest[4 * i + 1] = SCALE_4_8(intensity);
+            dest[4 * i + 2] = SCALE_4_8(intensity);
+            dest[4 * i + 3] = SCALE_4_8(alpha);
             i++;
         }
     }
 
-    mRapi->UploadTexture(mTexUploadBuffer, width, height);
+    if (isZeroCopy) {
+        mRapi->UnlockTextureStagingBuffer();
+    } else {
+        mRapi->UploadTexture(mTexUploadBuffer, width, height);
+    }
 }
 
 void Interpreter::ImportTextureIA16(int tile, bool importReplacement) {
@@ -743,6 +784,12 @@ void Interpreter::ImportTextureIA16(int tile, bool importReplacement) {
         full_image_line_size_bytes = width * 2;
     }
 
+    uint8_t* dest = mRapi->LockTextureStagingBuffer(width, height);
+    bool isZeroCopy = (dest != nullptr);
+    if (!isZeroCopy) {
+        dest = mTexUploadBuffer;
+    }
+
     uint32_t i = 0;
 
     for (uint32_t y = 0; y < height; y++) {
@@ -754,16 +801,20 @@ void Interpreter::ImportTextureIA16(int tile, bool importReplacement) {
             uint8_t r = intensity;
             uint8_t g = intensity;
             uint8_t b = intensity;
-            mTexUploadBuffer[4 * i + 0] = r;
-            mTexUploadBuffer[4 * i + 1] = g;
-            mTexUploadBuffer[4 * i + 2] = b;
-            mTexUploadBuffer[4 * i + 3] = alpha;
+            dest[4 * i + 0] = r;
+            dest[4 * i + 1] = g;
+            dest[4 * i + 2] = b;
+            dest[4 * i + 3] = alpha;
 
             i++;
         }
     }
 
-    mRapi->UploadTexture(mTexUploadBuffer, width, height);
+    if (isZeroCopy) {
+        mRapi->UnlockTextureStagingBuffer();
+    } else {
+        mRapi->UploadTexture(mTexUploadBuffer, width, height);
+    }
 }
 
 void Interpreter::ImportTextureI4(int tile, bool importReplacement) {
@@ -793,6 +844,12 @@ void Interpreter::ImportTextureI4(int tile, bool importReplacement) {
         fullImageLineSizeBytes = width / 2;
     }
 
+    uint8_t* dest = mRapi->LockTextureStagingBuffer(width, height);
+    bool isZeroCopy = (dest != nullptr);
+    if (!isZeroCopy) {
+        dest = mTexUploadBuffer;
+    }
+
     uint32_t i = 0;
 
     for (uint32_t y = 0; y < height; y++) {
@@ -806,16 +863,20 @@ void Interpreter::ImportTextureI4(int tile, bool importReplacement) {
             uint8_t g = intensity;
             uint8_t b = intensity;
             uint8_t a = intensity;
-            mTexUploadBuffer[4 * i + 0] = SCALE_4_8(r);
-            mTexUploadBuffer[4 * i + 1] = SCALE_4_8(g);
-            mTexUploadBuffer[4 * i + 2] = SCALE_4_8(b);
-            mTexUploadBuffer[4 * i + 3] = SCALE_4_8(a);
+            dest[4 * i + 0] = SCALE_4_8(r);
+            dest[4 * i + 1] = SCALE_4_8(g);
+            dest[4 * i + 2] = SCALE_4_8(b);
+            dest[4 * i + 3] = SCALE_4_8(a);
 
             i++;
         }
     }
 
-    mRapi->UploadTexture(mTexUploadBuffer, width, height);
+    if (isZeroCopy) {
+        mRapi->UnlockTextureStagingBuffer();
+    } else {
+        mRapi->UploadTexture(mTexUploadBuffer, width, height);
+    }
 }
 
 void Interpreter::ImportTextureI8(int tile, bool importReplacement) {
@@ -843,19 +904,29 @@ void Interpreter::ImportTextureI8(int tile, bool importReplacement) {
         fullImageLineSizeBytes = width;
     }
 
+    uint8_t* dest = mRapi->LockTextureStagingBuffer(width, height);
+    bool isZeroCopy = (dest != nullptr);
+    if (!isZeroCopy) {
+        dest = mTexUploadBuffer;
+    }
+
     uint32_t i = 0;
     for (uint32_t y = 0; y < height; y++) {
         for (uint32_t x = 0; x < width; x++) {
             uint8_t intensity = addr[y * fullImageLineSizeBytes + x];
-            mTexUploadBuffer[4 * i + 0] = intensity;
-            mTexUploadBuffer[4 * i + 1] = intensity;
-            mTexUploadBuffer[4 * i + 2] = intensity;
-            mTexUploadBuffer[4 * i + 3] = intensity;
+            dest[4 * i + 0] = intensity;
+            dest[4 * i + 1] = intensity;
+            dest[4 * i + 2] = intensity;
+            dest[4 * i + 3] = intensity;
             i++;
         }
     }
 
-    mRapi->UploadTexture(mTexUploadBuffer, width, height);
+    if (isZeroCopy) {
+        mRapi->UnlockTextureStagingBuffer();
+    } else {
+        mRapi->UploadTexture(mTexUploadBuffer, width, height);
+    }
 }
 
 void Interpreter::ImportTextureCi4(int tile, bool importReplacement) {
@@ -910,6 +981,12 @@ void Interpreter::ImportTextureCi4(int tile, bool importReplacement) {
         fullImageLineSizeBytes = resultLineSizeBytes;
     }
 
+    uint8_t* dest = mRapi->LockTextureStagingBuffer(width, height);
+    bool isZeroCopy = (dest != nullptr);
+    if (!isZeroCopy) {
+        dest = mTexUploadBuffer;
+    }
+
     uint32_t i = 0;
     for (uint32_t y = 0; y < height; y++) {
         for (uint32_t x = 0; x < width; x++) {
@@ -921,15 +998,19 @@ void Interpreter::ImportTextureCi4(int tile, bool importReplacement) {
             uint8_t r = col16 >> 11;
             uint8_t g = (col16 >> 6) & 0x1f;
             uint8_t b = (col16 >> 1) & 0x1f;
-            mTexUploadBuffer[4 * i + 0] = SCALE_5_8(r);
-            mTexUploadBuffer[4 * i + 1] = SCALE_5_8(g);
-            mTexUploadBuffer[4 * i + 2] = SCALE_5_8(b);
-            mTexUploadBuffer[4 * i + 3] = a ? 255 : 0;
+            dest[4 * i + 0] = SCALE_5_8(r);
+            dest[4 * i + 1] = SCALE_5_8(g);
+            dest[4 * i + 2] = SCALE_5_8(b);
+            dest[4 * i + 3] = a ? 255 : 0;
             i++;
         }
     }
 
-    mRapi->UploadTexture(mTexUploadBuffer, width, height);
+    if (isZeroCopy) {
+        mRapi->UnlockTextureStagingBuffer();
+    } else {
+        mRapi->UploadTexture(mTexUploadBuffer, width, height);
+    }
 }
 
 void Interpreter::ImportTextureCi8(int tile, bool importReplacement) {
@@ -955,22 +1036,6 @@ void Interpreter::ImportTextureCi8(int tile, bool importReplacement) {
         return;
     }
 
-    for (uint32_t i = 0, j = 0; i < sizeBytes; j += fullImageLineSizeBytes - lineSizeBytes) {
-        for (uint32_t k = 0; k < lineSizeBytes; i++, k++, j++) {
-            uint8_t idx = addr[j];
-            uint16_t col16 = (mRdp->palettes[idx / 128][(idx % 128) * 2] << 8) |
-                             mRdp->palettes[idx / 128][(idx % 128) * 2 + 1]; // Big endian load
-            uint8_t a = col16 & 1;
-            uint8_t r = col16 >> 11;
-            uint8_t g = (col16 >> 6) & 0x1f;
-            uint8_t b = (col16 >> 1) & 0x1f;
-            mTexUploadBuffer[4 * i + 0] = SCALE_5_8(r);
-            mTexUploadBuffer[4 * i + 1] = SCALE_5_8(g);
-            mTexUploadBuffer[4 * i + 2] = SCALE_5_8(b);
-            mTexUploadBuffer[4 * i + 3] = a ? 255 : 0;
-        }
-    }
-
     uint32_t baseLineSizeBytes = GetEffectiveLineSize(lineSizeBytes, fullImageLineSizeBytes, sizeBytes,
                                                       mRdp->texture_tile[tile].line_size_bytes);
     uint32_t resultLineSizeBytes = baseLineSizeBytes;
@@ -991,7 +1056,33 @@ void Interpreter::ImportTextureCi8(int tile, bool importReplacement) {
         height = tile_h;
     }
 
-    mRapi->UploadTexture(mTexUploadBuffer, width, height);
+    uint8_t* dest = mRapi->LockTextureStagingBuffer(width, height);
+    bool isZeroCopy = (dest != nullptr);
+    if (!isZeroCopy) {
+        dest = mTexUploadBuffer;
+    }
+
+    for (uint32_t i = 0, j = 0; i < sizeBytes; j += fullImageLineSizeBytes - lineSizeBytes) {
+        for (uint32_t k = 0; k < lineSizeBytes; i++, k++, j++) {
+            uint8_t idx = addr[j];
+            uint16_t col16 = (mRdp->palettes[idx / 128][(idx % 128) * 2] << 8) |
+                             mRdp->palettes[idx / 128][(idx % 128) * 2 + 1]; // Big endian load
+            uint8_t a = col16 & 1;
+            uint8_t r = col16 >> 11;
+            uint8_t g = (col16 >> 6) & 0x1f;
+            uint8_t b = (col16 >> 1) & 0x1f;
+            dest[4 * i + 0] = SCALE_5_8(r);
+            dest[4 * i + 1] = SCALE_5_8(g);
+            dest[4 * i + 2] = SCALE_5_8(b);
+            dest[4 * i + 3] = a ? 255 : 0;
+        }
+    }
+
+    if (isZeroCopy) {
+        mRapi->UnlockTextureStagingBuffer();
+    } else {
+        mRapi->UploadTexture(mTexUploadBuffer, width, height);
+    }
 }
 
 void Interpreter::ImportTextureImg(int tile, bool importReplacement) {
@@ -1008,7 +1099,14 @@ void Interpreter::ImportTextureImg(int tile, bool importReplacement) {
 
     uint16_t width = metadata->width;
     uint16_t height = metadata->height;
-    mRapi->UploadTexture(addr, width, height);
+
+    uint8_t* dest = mRapi->LockTextureStagingBuffer(width, height);
+    if (dest != nullptr) {
+        memcpy(dest, addr, width * height * 4);
+        mRapi->UnlockTextureStagingBuffer();
+    } else {
+        mRapi->UploadTexture(addr, width, height);
+    }
 }
 
 void Interpreter::ImportTextureRaw(int tile, bool importReplacement) {
@@ -1055,7 +1153,13 @@ void Interpreter::ImportTextureRaw(int tile, bool importReplacement) {
 
     if (resultNewLineSize == 4 * width && resultNewHeight == height) {
         // Can use the texture directly since it has the correct dimensions
-        mRapi->UploadTexture(addr, width, height);
+        uint8_t* dest = mRapi->LockTextureStagingBuffer(width, height);
+        if (dest != nullptr) {
+            memcpy(dest, addr, width * height * 4);
+            mRapi->UnlockTextureStagingBuffer();
+        } else {
+            mRapi->UploadTexture(addr, width, height);
+        }
         return;
     }
 
@@ -1078,17 +1182,33 @@ void Interpreter::ImportTextureRaw(int tile, bool importReplacement) {
         safeFullImageLineSizeBytes = resourceImageSizeBytes;
     }
 
+    uint32_t uploadWidth = resultNewLineSize / 4;
+    uint32_t uploadHeight = resultNewHeight;
+    uint8_t* dest = mRapi->LockTextureStagingBuffer(uploadWidth, uploadHeight);
+    bool isZeroCopy = (dest != nullptr);
+    if (!isZeroCopy) {
+        dest = mTexUploadBuffer;
+    }
+
     // Safely only copy the amount of bytes the resource can allow
-    for (uint32_t i = 0, j = 0; i < safeLoadedBytes; i += safeLineSizeBytes, j += safeFullImageLineSizeBytes) {
-        memcpy(mTexUploadBuffer + i, addr + j, safeLineSizeBytes);
+    if (safeLineSizeBytes == safeFullImageLineSizeBytes && numLoadedBytes == safeLoadedBytes) {
+        memcpy(dest, addr, safeLoadedBytes);
+    } else {
+        for (uint32_t i = 0, j = 0; i < safeLoadedBytes; i += safeLineSizeBytes, j += safeFullImageLineSizeBytes) {
+            memcpy(dest + i, addr + j, safeLineSizeBytes);
+        }
     }
 
     // Set the remaining bytes to load as 0
     if (numLoadedBytes > resourceImageSizeBytes) {
-        memset(mTexUploadBuffer + resourceImageSizeBytes, 0, numLoadedBytes - resourceImageSizeBytes);
+        memset(dest + resourceImageSizeBytes, 0, numLoadedBytes - resourceImageSizeBytes);
     }
 
-    mRapi->UploadTexture(mTexUploadBuffer, resultNewLineSize / 4, resultNewHeight);
+    if (isZeroCopy) {
+        mRapi->UnlockTextureStagingBuffer();
+    } else {
+        mRapi->UploadTexture(mTexUploadBuffer, uploadWidth, uploadHeight);
+    }
 }
 
 void Interpreter::ImportTexture(int i, int tile, bool importReplacement) {
@@ -2910,7 +3030,7 @@ void Interpreter::Gfxs2dexBgCopy(F3DuObjBg* bg) {
 
     if ((bool)gfx_check_image_signature((char*)data)) {
         std::shared_ptr<Fast::Texture> tex = std::static_pointer_cast<Fast::Texture>(
-            Ship::Context::GetInstance()->GetResourceManager()->LoadResourceProcess((char*)data));
+            Ship::Context::GetInstance()->GetResourceManager()->LoadResource((char*)data));
         texFlags = tex->Flags;
         rawTexMetadata.width = tex->Width;
         rawTexMetadata.height = tex->Height;
@@ -2947,7 +3067,7 @@ void Interpreter::Gfxs2dexBg1cyc(F3DuObjBg* bg) {
 
     if ((bool)gfx_check_image_signature((char*)data)) {
         std::shared_ptr<Fast::Texture> tex = std::static_pointer_cast<Fast::Texture>(
-            Ship::Context::GetInstance()->GetResourceManager()->LoadResourceProcess((char*)data));
+            Ship::Context::GetInstance()->GetResourceManager()->LoadResource((char*)data));
         texFlags = tex->Flags;
         rawTexMetadata.width = tex->Width;
         rawTexMetadata.height = tex->Height;
@@ -3412,7 +3532,14 @@ bool gfx_vtx_hash_handler_custom(F3DGfx** cmd0) {
         gfx->GfxSpVertex(C0(12, 8), C0(1, 7) - C0(12, 8), (F3DVtx*)offset);
         (*cmd0)++;
     } else {
-        F3DVtx* vtx = (F3DVtx*)Ship::Context::GetInstance()->GetResourceManager()->GetResourceRawPointer(hash);
+        auto future = Ship::Context::GetInstance()->GetResourceManager()->LoadResourceAsync(hash);
+
+        if (future.wait_for(std::chrono::seconds(0)) != std::future_status::ready) {
+            (*cmd0)++;
+            return false;
+        }
+
+        F3DVtx* vtx = (F3DVtx*)Ship::Context::GetInstance()->GetResourceManager()->GetResourceRawPointer(future.get());
 
         if (vtx != NULL) {
             vtx = (F3DVtx*)((char*)vtx + offset);
@@ -3749,8 +3876,14 @@ bool gfx_set_timg_handler_rdp(F3DGfx** cmd0) {
 
     if ((i & 1) != 1) {
         if (gfx_check_image_signature(imgData) == 1) {
-            std::shared_ptr<Fast::Texture> tex = std::static_pointer_cast<Fast::Texture>(
-                Ship::Context::GetInstance()->GetResourceManager()->LoadResourceProcess(imgData));
+            auto future = Ship::Context::GetInstance()->GetResourceManager()->LoadResourceAsync(imgData);
+
+            if (future.wait_for(std::chrono::seconds(0)) != std::future_status::ready) {
+                (*cmd0)++;
+                return false;
+            }
+
+            std::shared_ptr<Fast::Texture> tex = std::static_pointer_cast<Fast::Texture>(future.get());
 
             if (tex == nullptr) {
                 (*cmd0)++;
@@ -3794,9 +3927,15 @@ bool gfx_set_timg_otr_hash_handler_custom(F3DGfx** cmd0) {
         return false;
     }
 
-    std::shared_ptr<Fast::Texture> texture =
-        std::static_pointer_cast<Fast::Texture>(Ship::Context::GetInstance()->GetResourceManager()->LoadResourceProcess(
-            Ship::Context::GetInstance()->GetResourceManager()->GetArchiveManager()->HashToCString(hash)));
+    auto future = Ship::Context::GetInstance()->GetResourceManager()->LoadResourceAsync(
+        Ship::Context::GetInstance()->GetResourceManager()->GetArchiveManager()->HashToCString(hash));
+
+    if (future.wait_for(std::chrono::seconds(0)) != std::future_status::ready) {
+        (*cmd0)++;
+        return false;
+    }
+
+    std::shared_ptr<Fast::Texture> texture = std::static_pointer_cast<Fast::Texture>(future.get());
     if (texture != nullptr) {
         texFlags = texture->Flags;
         rawTexMetadata.width = texture->Width;
@@ -3851,7 +3990,7 @@ bool gfx_set_timg_otr_filepath_handler_custom(F3DGfx** cmd0) {
     RawTexMetadata rawTexMetadata = {};
 
     std::shared_ptr<Fast::Texture> texture = std::static_pointer_cast<Fast::Texture>(
-        Ship::Context::GetInstance()->GetResourceManager()->LoadResourceProcess(fileName));
+        Ship::Context::GetInstance()->GetResourceManager()->LoadResource(fileName));
     if (texture != nullptr) {
         Interpreter* gfx = mInstance.lock().get();
         texFlags = texture->Flags;
@@ -4786,6 +4925,55 @@ void Interpreter::RunGuiOnly() {
     }
 }
 
+void Interpreter::Preload(Gfx* commands) {
+    F3DGfx* cmd = (F3DGfx*)commands;
+    auto resourceManager = Ship::Context::GetInstance()->GetResourceManager();
+
+    size_t commandsScanned = 0;
+    const size_t maxCommands = 10000;
+
+    while (commandsScanned < maxCommands) {
+        int8_t opcode = (int8_t)(cmd->words.w0 >> 24);
+
+        if (opcode == OTR_G_SETTIMG_OTR_HASH || opcode == OTR_G_VTX_OTR_HASH || opcode == OTR_G_DL_OTR_HASH ||
+            opcode == OTR_G_MTX_OTR) {
+            uint64_t hash = ((uint64_t)cmd[1].words.w0 << 32) + (uint64_t)cmd[1].words.w1;
+            resourceManager->LoadResourceAsync(hash, false, BS::pr::highest);
+        } else if (opcode == (int8_t)RDP_G_SETTIMG || opcode == F3DEX2_G_DL || opcode == F3DEX_G_DL ||
+                   opcode == F3DEX2_G_VTX || opcode == F3DEX_G_VTX) {
+            uintptr_t i = (uintptr_t)SegAddr(cmd->words.w1);
+            const char* imgData = (char*)i;
+            if ((i & 1) != 1 && gfx_check_image_signature(imgData) == 1) {
+                resourceManager->LoadResourceAsync(imgData, false, BS::pr::highest);
+            }
+        } else if (opcode == OTR_G_SETTIMG_OTR_FILEPATH || opcode == OTR_G_VTX_OTR_FILEPATH ||
+                   opcode == OTR_G_DL_OTR_FILEPATH || opcode == OTR_G_MTX_OTR_FILEPATH) {
+            const char* fileName = (char*)cmd->words.w1;
+            if (gfx_check_image_signature(fileName)) {
+                resourceManager->LoadResourceAsync(fileName, false, BS::pr::highest);
+            }
+        } else if (opcode == F3DEX2_G_MOVEWORD || opcode == F3DEX_G_MOVEWORD) {
+            uint8_t type = (uint8_t)(cmd->words.w0 >> 16);
+            if (type == G_MW_SEGMENT) {
+                uint8_t seg = (uint8_t)((cmd->words.w0 & 0xFFFF) >> 2);
+                mSegmentPointers[seg] = cmd->words.w1;
+            }
+        } else if (opcode == F3DEX2_G_ENDDL || opcode == F3DEX_G_ENDDL) {
+            break;
+        }
+
+        if (opcode == OTR_G_SETTIMG_OTR_HASH || opcode == OTR_G_VTX_OTR_HASH || opcode == OTR_G_DL_OTR_HASH ||
+            opcode == OTR_G_BRANCH_Z_OTR || opcode == OTR_G_MARKER || opcode == OTR_G_MTX_OTR ||
+            opcode == OTR_G_MOVEMEM_HASH) {
+            cmd += 2;
+            commandsScanned += 2;
+        } else {
+            cmd++;
+            commandsScanned++;
+        }
+    }
+}
+
 void Interpreter::Run(Gfx* commands, const std::unordered_map<Mtx*, MtxF>& mtx_replacements) {
     SpReset();
 
@@ -4793,6 +4981,8 @@ void Interpreter::Run(Gfx* commands, const std::unordered_map<Mtx*, MtxF>& mtx_r
     mGetPixelDepthCached.clear();
 
     mCurMtxReplacements = &mtx_replacements;
+
+    Preload(commands);
 
     mRapi->UpdateFramebufferParameters(0, mGfxCurrentWindowDimensions.width, mGfxCurrentWindowDimensions.height, 1,
                                        false, true, true, !mRendersToFb);
@@ -5011,7 +5201,7 @@ void Interpreter::RegisterBlendedTexture(const char* name, uint8_t* mask, uint8_
 
     if (gfx_check_image_signature(reinterpret_cast<char*>(replacement))) {
         Fast::Texture* tex = std::static_pointer_cast<Fast::Texture>(
-                                 Ship::Context::GetInstance()->GetResourceManager()->LoadResourceProcess(
+                                 Ship::Context::GetInstance()->GetResourceManager()->LoadResource(
                                      reinterpret_cast<char*>(replacement)))
                                  .get();
 

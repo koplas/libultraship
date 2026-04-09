@@ -3,14 +3,15 @@
 #include <memory>
 #include <vector>
 #include "Stream.h"
+#include "ship/utils/ShipBuffer.h"
 
 namespace Ship {
 class MemoryStream final : public Stream {
   public:
     MemoryStream();
     MemoryStream(char* nBuffer, size_t nBufferSize);
-    MemoryStream(std::shared_ptr<std::vector<char>> buffer);
-    MemoryStream(std::shared_ptr<std::vector<char>> buffer, size_t offset);
+    MemoryStream(std::shared_ptr<Buffer> buffer);
+    MemoryStream(std::shared_ptr<Buffer> buffer, size_t offset);
     ~MemoryStream();
 
     uint64_t GetLength() override;
@@ -30,7 +31,7 @@ class MemoryStream final : public Stream {
     void Close() override;
 
   protected:
-    std::shared_ptr<std::vector<char>> mBuffer;
+    std::shared_ptr<Buffer> mBuffer;
     std::size_t mBufferSize;
 };
 } // namespace Ship

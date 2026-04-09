@@ -6,25 +6,25 @@
 #endif
 
 Ship::MemoryStream::MemoryStream() {
-    mBuffer = std::make_shared<std::vector<char>>();
+    mBuffer = std::make_shared<Buffer>();
     // mBuffer.reserve(1024 * 16);
     mBufferSize = 0;
     mBaseAddress = 0;
 }
 
 Ship::MemoryStream::MemoryStream(char* nBuffer, size_t nBufferSize) : MemoryStream() {
-    mBuffer = std::make_shared<std::vector<char>>(nBuffer, nBuffer + nBufferSize);
+    mBuffer = std::make_shared<Buffer>(nBuffer, nBuffer + nBufferSize);
     mBufferSize = nBufferSize;
     mBaseAddress = 0;
 }
 
-Ship::MemoryStream::MemoryStream(std::shared_ptr<std::vector<char>> buffer) : MemoryStream() {
+Ship::MemoryStream::MemoryStream(std::shared_ptr<Buffer> buffer) : MemoryStream() {
     mBuffer = buffer;
     mBufferSize = buffer->size();
     mBaseAddress = 0;
 }
 
-Ship::MemoryStream::MemoryStream(std::shared_ptr<std::vector<char>> buffer, size_t offset) : MemoryStream() {
+Ship::MemoryStream::MemoryStream(std::shared_ptr<Buffer> buffer, size_t offset) : MemoryStream() {
     mBuffer = buffer;
     mBufferSize = buffer->size();
     mBaseAddress = offset;
@@ -85,7 +85,7 @@ void Ship::MemoryStream::WriteByte(int8_t value) {
 }
 
 std::vector<char> Ship::MemoryStream::ToVector() {
-    return *mBuffer;
+    return std::vector<char>(mBuffer->begin(), mBuffer->end());
 }
 
 void Ship::MemoryStream::Flush() {

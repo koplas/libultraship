@@ -8,6 +8,7 @@
 #include <mutex>
 #include <queue>
 #include <variant>
+#include <future>
 #include "ship/resource/Resource.h"
 #include "ship/resource/ResourceLoader.h"
 #include "ship/resource/archive/Archive.h"
@@ -85,6 +86,9 @@ class ResourceManager {
     std::shared_future<std::shared_ptr<IResource>>
     LoadResourceAsync(const ResourceIdentifier& identifier, bool loadExact = false,
                       BS::priority_t priority = BS::pr::normal, std::shared_ptr<ResourceInitData> initData = nullptr);
+    std::shared_future<std::shared_ptr<IResource>>
+    LoadResourceAsync(uint64_t crc, bool loadExact = false, BS::priority_t priority = BS::pr::normal,
+                      std::shared_ptr<ResourceInitData> initData = nullptr);
     size_t UnloadResource(const ResourceIdentifier& identifier);
     size_t UnloadResource(const std::string& filePath);
     bool WriteResource(const ResourceIdentifier& identifier, const std::vector<uint8_t>& data, bool unloadFile);
@@ -135,6 +139,8 @@ class ResourceManager {
     std::unordered_map<ResourceIdentifier, std::variant<ResourceLoadError, std::shared_ptr<IResource>>,
                        ResourceIdentifierHash>
         mResourceCache;
+    std::unordered_map<ResourceIdentifier, std::shared_future<std::shared_ptr<IResource>>, ResourceIdentifierHash>
+        mInFlightRequests;
     std::shared_ptr<ResourceLoader> mResourceLoader;
     std::shared_ptr<ArchiveManager> mArchiveManager;
     std::shared_ptr<BS::thread_pool> mThreadPool;

@@ -41,6 +41,11 @@ class GfxRenderingAPI {
     virtual uint32_t NewTexture() = 0;
     virtual void SelectTexture(int tile, uint32_t textureId) = 0;
     virtual void UploadTexture(const uint8_t* rgba32Buf, uint32_t width, uint32_t height) = 0;
+    virtual uint8_t* LockTextureStagingBuffer(uint32_t width, uint32_t height) {
+        return nullptr;
+    }
+    virtual void UnlockTextureStagingBuffer() {
+    }
     virtual void SetSamplerParameters(int sampler, bool linear_filter, uint32_t cms, uint32_t cmt) = 0;
     virtual void SetDepthTestAndMask(bool depth_test, bool z_upd) = 0;
     virtual void SetZmodeDecal(bool decal) = 0;

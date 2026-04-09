@@ -7,6 +7,7 @@
 #include <stdint.h>
 #include "ship/resource/ResourceType.h"
 #include "ship/utils/binarytools/BinaryReader.h"
+#include "ship/utils/ShipBuffer.h"
 
 namespace tinyxml2 {
 class XMLDocument;
@@ -31,7 +32,7 @@ struct ResourceInitData {
 };
 
 struct File {
-    std::shared_ptr<std::vector<char>> Buffer;
+    std::shared_ptr<Buffer> Buffer;
     size_t BufferOffset = 0;
     std::variant<std::shared_ptr<tinyxml2::XMLDocument>, std::shared_ptr<BinaryReader>> Reader;
     bool IsLoaded = false;

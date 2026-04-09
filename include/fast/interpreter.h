@@ -370,6 +370,7 @@ class Interpreter {
     void StartFrame();
     void RunGuiOnly();
     void Run(Gfx* commands, const std::unordered_map<Mtx*, MtxF>& mtx_replacements);
+    void Preload(Gfx* commands);
     void EndFrame();
     void HandleWindowEvents();
     bool IsFrameReady();

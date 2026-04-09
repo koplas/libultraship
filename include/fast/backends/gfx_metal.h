@@ -13,6 +13,16 @@
 #include <imgui_impl_sdl2.h>
 #include <simd/simd.h>
 
+#include <dispatch/dispatch.h>
+
+struct GfxMetalOrigin {
+    uint64_t x, y, z;
+};
+
+struct GfxMetalSize {
+    uint64_t width, height, depth;
+};
+
 static constexpr size_t kMaxVertexBufferPoolSize = 3;
 static constexpr size_t METAL_MAX_MULTISAMPLE_SAMPLE_COUNT = 8;
 static constexpr size_t MAX_PIXEL_DEPTH_COORDS = 1024;
@@ -31,6 +41,8 @@ class Buffer;
 class RenderPipelineState;
 class CommandQueue;
 class Viewport;
+struct Origin;
+struct Size;
 } // namespace MTL
 
 namespace CA {
@@ -94,6 +106,7 @@ struct FramebufferMetal {
     bool mHasEndedEncoding;
     bool mHasBoundVertexShader;
     bool mHasBoundFragShader;
+    bool mIsFirstPass;
 
     struct ShaderProgramMetal* mLastShaderProgram;
     MTL::Texture* mLastBoundTextures[SHADER_MAX_TEXTURES];
@@ -119,9 +132,17 @@ struct CoordUniforms {
     simd::uint2 coords[MAX_PIXEL_DEPTH_COORDS];
 };
 
+struct PendingTextureUpload {
+    MTL::Texture* texture;
+    MTL::Buffer* stagingBuffer;
+    GfxMetalOrigin origin;
+    GfxMetalSize size;
+    uint32_t bytesPerRow;
+};
+
 class GfxRenderingAPIMetal final : public GfxRenderingAPI {
   public:
-    ~GfxRenderingAPIMetal() override = default;
+    ~GfxRenderingAPIMetal() override;
     const char* GetName() override;
     int GetMaxTextureSize() override;
     GfxClipParameters GetClipParameters() override;
@@ -133,6 +154,8 @@ class GfxRenderingAPIMetal final : public GfxRenderingAPI {
     uint32_t NewTexture() override;
     void SelectTexture(int tile, uint32_t textureId) override;
     void UploadTexture(const uint8_t* rgba32Buf, uint32_t width, uint32_t height) override;
+    uint8_t* LockTextureStagingBuffer(uint32_t width, uint32_t height) override;
+    void UnlockTextureStagingBuffer() override;
     void SetSamplerParameters(int sampler, bool linear_filter, uint32_t cms, uint32_t cmt) override;
     void SetDepthTestAndMask(bool depth_test, bool z_upd) override;
     void SetZmodeDecal(bool decal) override;
@@ -173,6 +196,8 @@ class GfxRenderingAPIMetal final : public GfxRenderingAPI {
   private:
     bool NonUniformThreadGroupSupported();
     void SetupScreenFramebuffer(uint32_t width, uint32_t height);
+    MTL::Buffer* GetStagingBuffer(size_t size);
+    void ProcessPendingUploads(FramebufferMetal& fb);
     // Elements that only need to be setup once
     SDL_Renderer* mRenderer;
     CA::MetalLayer* mLayer; // CA::MetalLayer*
@@ -184,8 +209,13 @@ class GfxRenderingAPIMetal final : public GfxRenderingAPI {
     std::unordered_map<std::pair<uint64_t, uint32_t>, struct ShaderProgramMetal, hash_pair_shader_ids>
         mShaderProgramPool;
 
+    dispatch_semaphore_t mInFlightSemaphore;
     std::vector<struct TextureDataMetal> mTextures;
     std::vector<FramebufferMetal> mFramebuffers;
+    std::vector<PendingTextureUpload> mPendingUploads;
+    PendingTextureUpload mLockedUpload;
+    std::vector<MTL::Buffer*> mStagingBufferPool[3];
+    size_t mCurrentStagingBufferIndex = 0;
     FrameUniforms mFrameUniforms;
     CoordUniforms mCoordUniforms;
     DrawUniforms mDrawUniforms;
@@ -206,6 +236,7 @@ class GfxRenderingAPIMetal final : public GfxRenderingAPI {
     std::set<int> mDrawnFramebuffers;
     NS::AutoreleasePool* mFrameAutoreleasePool;
 
+    int mFrameIndex = 0;
     int mCurrentTile;
     uint32_t mCurrentTextureIds[SHADER_MAX_TEXTURES];
 

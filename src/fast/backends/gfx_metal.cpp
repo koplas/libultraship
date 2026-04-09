@@ -79,6 +79,9 @@ bool GfxRenderingAPIMetal::MetalInit(SDL_Renderer* renderer) {
 
     mDevice = mLayer->device();
     mCommandQueue = mDevice->newCommandQueue();
+    mInFlightSemaphore = dispatch_semaphore_create(kMaxVertexBufferPoolSize);
+    mLockedUpload = {};
+    mLockedUpload.texture = nullptr;
 
     for (size_t i = 0; i < kMaxVertexBufferPoolSize; i++) {
         MTL::Buffer* new_buffer = mDevice->newBuffer(256 * 32 * 3 * sizeof(float) * 50, MTL::ResourceStorageModeShared);
@@ -127,6 +130,139 @@ void GfxRenderingAPIMetal::RenderDrawData(ImDrawData* drawData) {
 
 const char* GfxRenderingAPIMetal::GetName() {
     return "Metal";
+}
+
+GfxRenderingAPIMetal::~GfxRenderingAPIMetal() {
+    for (int i = 0; i < 3; i++) {
+        for (MTL::Buffer* buffer : mStagingBufferPool[i]) {
+            buffer->release();
+        }
+        mStagingBufferPool[i].clear();
+    }
+
+    if (mFrameUniformBuffer) {
+        mFrameUniformBuffer->release();
+    }
+    if (mCoordUniformBuffer) {
+        mCoordUniformBuffer->release();
+    }
+}
+
+MTL::Buffer* GfxRenderingAPIMetal::GetStagingBuffer(size_t size) {
+    auto& pool = mStagingBufferPool[mFrameIndex];
+    if (mCurrentStagingBufferIndex < pool.size()) {
+        MTL::Buffer* buffer = pool[mCurrentStagingBufferIndex];
+        if (buffer->length() >= size) {
+            mCurrentStagingBufferIndex++;
+            return buffer;
+        }
+        // If the buffer is too small, release it and create a new one below
+        buffer->release();
+        pool.erase(pool.begin() + mCurrentStagingBufferIndex);
+    }
+
+    MTL::Buffer* new_buffer = mDevice->newBuffer(size, MTL::ResourceStorageModeShared);
+    pool.insert(pool.begin() + mCurrentStagingBufferIndex, new_buffer);
+    mCurrentStagingBufferIndex++;
+    return new_buffer;
+}
+
+void GfxRenderingAPIMetal::ProcessPendingUploads(FramebufferMetal& fb) {
+    if (mPendingUploads.empty() || fb.mCommandBuffer == nullptr) {
+        return;
+    }
+
+    bool was_encoding = false;
+    if (fb.mCommandEncoder != nullptr && !fb.mHasEndedEncoding) {
+        fb.mCommandEncoder->endEncoding();
+        fb.mHasEndedEncoding = true;
+        was_encoding = true;
+    }
+
+    MTL::BlitCommandEncoder* blit_encoder = fb.mCommandBuffer->blitCommandEncoder();
+    blit_encoder->setLabel(NS::String::string("Texture Upload Blit Encoder", NS::UTF8StringEncoding));
+
+    for (const auto& upload : mPendingUploads) {
+        MTL::Size mtl_size = MTL::Size(upload.size.width, upload.size.height, upload.size.depth);
+        MTL::Origin mtl_origin = MTL::Origin(upload.origin.x, upload.origin.y, upload.origin.z);
+
+        blit_encoder->copyFromBuffer(upload.stagingBuffer, 0, upload.bytesPerRow, 0, mtl_size, upload.texture, 0, 0,
+                                     mtl_origin);
+
+        // Generate mipmaps if needed
+        if (upload.texture->mipmapLevelCount() > 1) {
+            blit_encoder->generateMipmaps(upload.texture);
+        }
+
+        upload.texture->release();
+    }
+
+    blit_encoder->endEncoding();
+    mPendingUploads.clear();
+
+    if (was_encoding) {
+        // Mid-frame restart MUST load previous contents instead of clearing if it's not the first pass
+        MTL::LoadAction originalColorActions[8] = { MTL::LoadActionDontCare, MTL::LoadActionDontCare,
+                                                    MTL::LoadActionDontCare, MTL::LoadActionDontCare,
+                                                    MTL::LoadActionDontCare, MTL::LoadActionDontCare,
+                                                    MTL::LoadActionDontCare, MTL::LoadActionDontCare };
+        MTL::LoadAction originalDepthAction = MTL::LoadActionDontCare;
+        MTL::LoadAction originalStencilAction = MTL::LoadActionDontCare;
+
+        if (fb.mRenderPassDescriptor != nullptr && !fb.mIsFirstPass) {
+            for (int i = 0; i < 8; i++) {
+                auto attachment = fb.mRenderPassDescriptor->colorAttachments()->object(i);
+                if (attachment && attachment->texture()) {
+                    originalColorActions[i] = attachment->loadAction();
+                    attachment->setLoadAction(MTL::LoadActionLoad);
+                }
+            }
+            if (fb.mRenderPassDescriptor->depthAttachment() && fb.mRenderPassDescriptor->depthAttachment()->texture()) {
+                originalDepthAction = fb.mRenderPassDescriptor->depthAttachment()->loadAction();
+                fb.mRenderPassDescriptor->depthAttachment()->setLoadAction(MTL::LoadActionLoad);
+            }
+            if (fb.mRenderPassDescriptor->stencilAttachment() &&
+                fb.mRenderPassDescriptor->stencilAttachment()->texture()) {
+                originalStencilAction = fb.mRenderPassDescriptor->stencilAttachment()->loadAction();
+                fb.mRenderPassDescriptor->stencilAttachment()->setLoadAction(MTL::LoadActionLoad);
+            }
+        }
+
+        fb.mCommandEncoder = fb.mCommandBuffer->renderCommandEncoder(fb.mRenderPassDescriptor);
+        fb.mIsFirstPass = false;
+
+        // Restore original load actions to the descriptor for future use
+        if (fb.mRenderPassDescriptor != nullptr && !fb.mIsFirstPass) {
+            for (int i = 0; i < 8; i++) {
+                auto attachment = fb.mRenderPassDescriptor->colorAttachments()->object(i);
+                if (attachment && attachment->texture()) {
+                    attachment->setLoadAction(originalColorActions[i]);
+                }
+            }
+            if (fb.mRenderPassDescriptor->depthAttachment() && fb.mRenderPassDescriptor->depthAttachment()->texture()) {
+                fb.mRenderPassDescriptor->depthAttachment()->setLoadAction(originalDepthAction);
+            }
+            if (fb.mRenderPassDescriptor->stencilAttachment() &&
+                fb.mRenderPassDescriptor->stencilAttachment()->texture()) {
+                fb.mRenderPassDescriptor->stencilAttachment()->setLoadAction(originalStencilAction);
+            }
+        }
+
+        fb.mHasEndedEncoding = false;
+        fb.mHasBoundVertexShader = false;
+        fb.mHasBoundFragShader = false;
+        fb.mLastShaderProgram = nullptr;
+        fb.mLastDepthTest = -1;
+        fb.mLastDepthMask = -1;
+        fb.mLastZmodeDecal = -1;
+        for (int i = 0; i < SHADER_MAX_TEXTURES; i++) {
+            fb.mLastBoundTextures[i] = nullptr;
+            fb.mLastBoundSamplers[i] = nullptr;
+        }
+
+        fb.mCommandEncoder->setViewport(*fb.mViewport);
+        fb.mCommandEncoder->setScissorRect(*fb.mScissorRect);
+    }
 }
 
 int GfxRenderingAPIMetal::GetMaxTextureSize() {
@@ -333,25 +469,74 @@ void GfxRenderingAPIMetal::UploadTexture(const uint8_t* rgba32_buf, uint32_t wid
     texture_descriptor->setArrayLength(1);
     texture_descriptor->setMipmapLevelCount(1);
     texture_descriptor->setSampleCount(1);
-    texture_descriptor->setStorageMode(MTL::StorageModeShared);
+    texture_descriptor->setStorageMode(MTL::StorageModePrivate);
 
-    MTL::Region region = MTL::Region::Make2D(0, 0, width, height);
+    if (texture_data->texture != nullptr)
+        texture_data->texture->release();
 
-    MTL::Texture* texture = texture_data->texture;
-    if (texture_data->texture == nullptr || texture_data->texture->width() != width ||
-        texture_data->texture->height() != height) {
-        if (texture_data->texture != nullptr)
-            texture_data->texture->release();
-
-        texture = mDevice->newTexture(texture_descriptor);
-    }
+    texture_data->texture = mDevice->newTexture(texture_descriptor);
+    texture_data->width = width;
+    texture_data->height = height;
 
     NS::UInteger bytes_per_pixel = 4;
     NS::UInteger bytes_per_row = bytes_per_pixel * width;
-    texture->replaceRegion(region, 0, rgba32_buf, bytes_per_row);
-    texture_data->texture = texture;
+    size_t total_bytes = bytes_per_row * height;
+
+    MTL::Buffer* staging_buffer = GetStagingBuffer(total_bytes);
+    memcpy(staging_buffer->contents(), rgba32_buf, total_bytes);
+
+    PendingTextureUpload upload;
+    upload.texture = texture_data->texture;
+    upload.texture->retain();
+    upload.stagingBuffer = staging_buffer;
+    upload.origin = { 0, 0, 0 };
+    upload.size = { (uint64_t)width, (uint64_t)height, 1 };
+    upload.bytesPerRow = (uint32_t)bytes_per_row;
+    mPendingUploads.push_back(upload);
 
     autorelease_pool->release();
+}
+
+uint8_t* GfxRenderingAPIMetal::LockTextureStagingBuffer(uint32_t width, uint32_t height) {
+    if (width == 0 || height == 0) {
+        return nullptr;
+    }
+
+    TextureDataMetal* texture_data = &mTextures[mCurrentTextureIds[mCurrentTile]];
+
+    MTL::TextureDescriptor* texture_descriptor =
+        MTL::TextureDescriptor::texture2DDescriptor(MTL::PixelFormatRGBA8Unorm, width, height, true);
+    texture_descriptor->setArrayLength(1);
+    texture_descriptor->setMipmapLevelCount(1);
+    texture_descriptor->setSampleCount(1);
+    texture_descriptor->setStorageMode(MTL::StorageModePrivate);
+
+    if (texture_data->texture != nullptr)
+        texture_data->texture->release();
+
+    texture_data->texture = mDevice->newTexture(texture_descriptor);
+    texture_data->width = width;
+    texture_data->height = height;
+
+    NS::UInteger bytes_per_pixel = 4;
+    NS::UInteger bytes_per_row = bytes_per_pixel * width;
+    size_t total_bytes = bytes_per_row * height;
+
+    MTL::Buffer* staging_buffer = GetStagingBuffer(total_bytes);
+
+    mLockedUpload.texture = texture_data->texture;
+    mLockedUpload.texture->retain();
+    mLockedUpload.stagingBuffer = staging_buffer;
+    mLockedUpload.origin = { 0, 0, 0 };
+    mLockedUpload.size = { (uint64_t)width, (uint64_t)height, 1 };
+    mLockedUpload.bytesPerRow = (uint32_t)bytes_per_row;
+
+    return (uint8_t*)staging_buffer->contents();
+}
+
+void GfxRenderingAPIMetal::UnlockTextureStagingBuffer() {
+    mPendingUploads.push_back(mLockedUpload);
+    mLockedUpload = {};
 }
 
 void GfxRenderingAPIMetal::SetSamplerParameters(int tile, bool linear_filter, uint32_t cms, uint32_t cmt) {
@@ -420,13 +605,16 @@ void GfxRenderingAPIMetal::SetUseAlpha(bool use_alpha) {
 }
 
 void GfxRenderingAPIMetal::DrawTriangles(float buf_vbo[], size_t buf_vbo_len, size_t buf_vbo_num_tris) {
-    NS::AutoreleasePool* autorelease_pool = NS::AutoreleasePool::alloc()->init();
     bool textures_changed = false;
 
     auto& current_framebuffer = mFramebuffers[mCurrentFramebuffer];
 
-    if (current_framebuffer.mLastDepthTest != mCurrentDepthTest ||
-        current_framebuffer.mLastDepthMask != mCurrentDepthMask) {
+    if (current_framebuffer.mCommandEncoder != nullptr) {
+        ProcessPendingUploads(current_framebuffer);
+    }
+
+    if (current_framebuffer.mCommandEncoder != nullptr && (current_framebuffer.mLastDepthTest != mCurrentDepthTest ||
+        current_framebuffer.mLastDepthMask != mCurrentDepthMask)) {
         current_framebuffer.mLastDepthTest = mCurrentDepthTest;
         current_framebuffer.mLastDepthMask = mCurrentDepthMask;
 
@@ -442,7 +630,7 @@ void GfxRenderingAPIMetal::DrawTriangles(float buf_vbo[], size_t buf_vbo_len, si
         depth_descriptor->release();
     }
 
-    if (current_framebuffer.mLastZmodeDecal != mCurrentZmodeDecal) {
+    if (current_framebuffer.mCommandEncoder != nullptr && current_framebuffer.mLastZmodeDecal != mCurrentZmodeDecal) {
         current_framebuffer.mLastZmodeDecal = mCurrentZmodeDecal;
 
         current_framebuffer.mCommandEncoder->setTriangleFillMode(MTL::TriangleFillModeFill);
@@ -471,61 +659,63 @@ void GfxRenderingAPIMetal::DrawTriangles(float buf_vbo[], size_t buf_vbo_len, si
     MTL::Buffer* vertex_buffer = mVertexBufferPool[mCurrentVertexBufferPoolIndex];
     memcpy((char*)vertex_buffer->contents() + mCurrentVertexBufferOffset, buf_vbo, sizeof(float) * buf_vbo_len);
 
-    if (!current_framebuffer.mHasBoundVertexShader) {
-        current_framebuffer.mCommandEncoder->setVertexBuffer(vertex_buffer, 0, 0);
-        current_framebuffer.mHasBoundVertexShader = true;
-    }
+    if (current_framebuffer.mCommandEncoder != nullptr) {
+        if (!current_framebuffer.mHasBoundVertexShader) {
+            current_framebuffer.mCommandEncoder->setVertexBuffer(vertex_buffer, 0, 0);
+            current_framebuffer.mHasBoundVertexShader = true;
+        }
 
-    current_framebuffer.mCommandEncoder->setVertexBufferOffset(mCurrentVertexBufferOffset, 0);
+        current_framebuffer.mCommandEncoder->setVertexBufferOffset(mCurrentVertexBufferOffset, 0);
 
-    if (!current_framebuffer.mHasBoundFragShader) {
-        current_framebuffer.mCommandEncoder->setFragmentBuffer(mFrameUniformBuffer, 0, 0);
-        current_framebuffer.mHasBoundFragShader = true;
-    }
+        if (!current_framebuffer.mHasBoundFragShader) {
+            current_framebuffer.mCommandEncoder->setFragmentBuffer(mFrameUniformBuffer, 0, 0);
+            current_framebuffer.mHasBoundFragShader = true;
+        }
 
-    for (int i = 0; i < SHADER_MAX_TEXTURES; i++) {
-        if (mShaderProgram->usedTextures[i]) {
-            if (current_framebuffer.mLastBoundTextures[i] != mTextures[mCurrentTextureIds[i]].texture) {
-                current_framebuffer.mLastBoundTextures[i] = mTextures[mCurrentTextureIds[i]].texture;
-                current_framebuffer.mCommandEncoder->setFragmentTexture(mTextures[mCurrentTextureIds[i]].texture, i);
+        for (int i = 0; i < SHADER_MAX_TEXTURES; i++) {
+            if (mShaderProgram->usedTextures[i]) {
+                if (current_framebuffer.mLastBoundTextures[i] != mTextures[mCurrentTextureIds[i]].texture) {
+                    current_framebuffer.mLastBoundTextures[i] = mTextures[mCurrentTextureIds[i]].texture;
+                    current_framebuffer.mCommandEncoder->setFragmentTexture(mTextures[mCurrentTextureIds[i]].texture, i);
 
-                if (current_framebuffer.mLastBoundSamplers[i] != mTextures[mCurrentTextureIds[i]].sampler) {
-                    current_framebuffer.mLastBoundSamplers[i] = mTextures[mCurrentTextureIds[i]].sampler;
-                    current_framebuffer.mCommandEncoder->setFragmentSamplerState(
-                        mTextures[mCurrentTextureIds[i]].sampler, i);
+                    if (current_framebuffer.mLastBoundSamplers[i] != mTextures[mCurrentTextureIds[i]].sampler) {
+                        current_framebuffer.mLastBoundSamplers[i] = mTextures[mCurrentTextureIds[i]].sampler;
+                        current_framebuffer.mCommandEncoder->setFragmentSamplerState(
+                            mTextures[mCurrentTextureIds[i]].sampler, i);
+                    }
                 }
+            }
+
+            if (mCurrentFilterMode == FILTER_THREE_POINT) {
+                mDrawUniforms.textureFiltering[i] = mTextures[mCurrentTextureIds[i]].filtering;
+                mDrawUniforms.textureFiltering[i] = mTextures[mCurrentTextureIds[i]].filtering;
+                textures_changed = true;
             }
         }
 
-        if (mCurrentFilterMode == FILTER_THREE_POINT) {
-            mDrawUniforms.textureFiltering[i] = mTextures[mCurrentTextureIds[i]].filtering;
-            mDrawUniforms.textureFiltering[i] = mTextures[mCurrentTextureIds[i]].filtering;
-            textures_changed = true;
+        if (textures_changed) {
+            current_framebuffer.mCommandEncoder->setFragmentBytes(&mDrawUniforms, sizeof(DrawUniforms), 1);
         }
+
+        if (current_framebuffer.mLastShaderProgram != mShaderProgram) {
+            current_framebuffer.mLastShaderProgram = mShaderProgram;
+
+            MTL::RenderPipelineState* pipeline_state =
+                mShaderProgram->pipeline_state_variants[current_framebuffer.mMsaaLevel];
+            current_framebuffer.mCommandEncoder->setRenderPipelineState(pipeline_state);
+        }
+
+        current_framebuffer.mCommandEncoder->drawPrimitives(MTL::PrimitiveTypeTriangle, 0.f, buf_vbo_num_tris * 3);
+        mCurrentVertexBufferOffset += sizeof(float) * buf_vbo_len;
     }
-
-    if (textures_changed) {
-        current_framebuffer.mCommandEncoder->setFragmentBytes(&mDrawUniforms, sizeof(DrawUniforms), 1);
-    }
-
-    if (current_framebuffer.mLastShaderProgram != mShaderProgram) {
-        current_framebuffer.mLastShaderProgram = mShaderProgram;
-
-        MTL::RenderPipelineState* pipeline_state =
-            mShaderProgram->pipeline_state_variants[current_framebuffer.mMsaaLevel];
-        current_framebuffer.mCommandEncoder->setRenderPipelineState(pipeline_state);
-    }
-
-    current_framebuffer.mCommandEncoder->drawPrimitives(MTL::PrimitiveTypeTriangle, 0.f, buf_vbo_num_tris * 3);
-    mCurrentVertexBufferOffset += sizeof(float) * buf_vbo_len;
-
-    autorelease_pool->release();
 }
 
 void GfxRenderingAPIMetal::OnResize() {
 }
 
 void GfxRenderingAPIMetal::StartFrame() {
+    dispatch_semaphore_wait(mInFlightSemaphore, DISPATCH_TIME_FOREVER);
+
     mFrameUniforms.frameCount++;
     if (mFrameUniforms.frameCount > 150) {
         // No high values, as noise starts to look ugly
@@ -540,6 +730,19 @@ void GfxRenderingAPIMetal::StartFrame() {
     }
 
     mCurrentVertexBufferOffset = 0;
+    mCurrentStagingBufferIndex = 0;
+    mFrameIndex = (mFrameIndex + 1) % 3;
+
+    for (const auto& upload : mPendingUploads) {
+        if (upload.texture) {
+            upload.texture->release();
+        }
+    }
+    mPendingUploads.clear();
+
+    for (auto& fb : mFramebuffers) {
+        fb.mIsFirstPass = true;
+    }
 
     mFrameAutoreleasePool = NS::AutoreleasePool::alloc()->init();
 }
@@ -549,7 +752,7 @@ void GfxRenderingAPIMetal::EndFrame() {
     it++;
 
     while (it != mDrawnFramebuffers.end()) {
-        auto framebuffer = mFramebuffers[*it];
+        auto& framebuffer = mFramebuffers[*it];
 
         if (!framebuffer.mHasEndedEncoding)
             framebuffer.mCommandEncoder->endEncoding();
@@ -558,9 +761,18 @@ void GfxRenderingAPIMetal::EndFrame() {
         it++;
     }
 
-    auto screen_framebuffer = mFramebuffers[0];
+    auto& screen_framebuffer = mFramebuffers[0];
+    ProcessPendingUploads(screen_framebuffer);
     screen_framebuffer.mCommandEncoder->endEncoding();
     screen_framebuffer.mCommandBuffer->presentDrawable(mCurrentDrawable);
+
+    mPendingUploads.clear();
+
+    dispatch_semaphore_t semaphore = mInFlightSemaphore;
+    screen_framebuffer.mCommandBuffer->addCompletedHandler([semaphore](MTL::CommandBuffer* cb) {
+        dispatch_semaphore_signal(semaphore);
+    });
+
     mCurrentVertexBufferPoolIndex = (mCurrentVertexBufferPoolIndex + 1) % kMaxVertexBufferPoolSize;
     screen_framebuffer.mCommandBuffer->commit();
 
@@ -628,8 +840,9 @@ void GfxRenderingAPIMetal::SetupScreenFramebuffer(uint32_t width, uint32_t heigh
 
     MTL::RenderPassDescriptor* render_pass_descriptor = MTL::RenderPassDescriptor::renderPassDescriptor();
     render_pass_descriptor->colorAttachments()->object(0)->setTexture(tex.texture);
-    render_pass_descriptor->colorAttachments()->object(0)->setLoadAction(MTL::LoadActionLoad);
+    render_pass_descriptor->colorAttachments()->object(0)->setLoadAction(MTL::LoadActionClear);
     render_pass_descriptor->colorAttachments()->object(0)->setStoreAction(MTL::StoreActionStore);
+    render_pass_descriptor->colorAttachments()->object(0)->setClearColor(MTL::ClearColor::Make(0, 0, 0, 1));
 
     tex.width = width;
     tex.height = height;
@@ -821,10 +1034,14 @@ void GfxRenderingAPIMetal::StartDrawToFramebuffer(int fb_id, float noise_scale) 
         // Queue the command buffers in order of start draw
         fb.mCommandBuffer->enqueue();
 
+        // Process any pending texture uploads
+        ProcessPendingUploads(fb);
+
         fb.mCommandEncoder = fb.mCommandBuffer->renderCommandEncoder(fb.mRenderPassDescriptor);
         std::string fbce_label = fmt::format("FrameBuffer {} Command Encoder", fb_id);
         fb.mCommandEncoder->setLabel(NS::String::string(fbce_label.c_str(), NS::UTF8StringEncoding));
         fb.mCommandEncoder->setDepthClipMode(MTL::DepthClipModeClamp);
+        fb.mIsFirstPass = false;
     }
 
     if (noise_scale != 0.0f) {
@@ -875,6 +1092,7 @@ void GfxRenderingAPIMetal::ClearFramebuffer(bool color, bool depth) {
     }
 
     // Reset the framebuffer so the encoder is setup again when rendering triangles
+    framebuffer.mIsFirstPass = false;
     framebuffer.mHasBoundVertexShader = false;
     framebuffer.mHasBoundFragShader = false;
     framebuffer.mLastShaderProgram = nullptr;

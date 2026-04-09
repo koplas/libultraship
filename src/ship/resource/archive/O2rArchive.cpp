@@ -44,22 +44,34 @@ std::shared_ptr<File> O2rArchive::LoadFile(const std::string& filePath) {
         return nullptr;
     }
 
-    struct zip_file* zipEntryFile = zip_fopen_index(mZipArchive, zipEntryIndex, 0);
-    if (!zipEntryFile) {
-        SPDLOG_TRACE("Failed to open file {} in zip archive  {}.", filePath, GetPath());
+    zip_flags_t flags = 0;
+    if (zipEntryStat.valid & ZIP_STAT_COMP_METHOD && zipEntryStat.comp_method == ZIP_CM_STORE) {
+        flags |= ZIP_FL_COMPRESSED;
+    }
+
+    zip_source_t* src = zip_source_zip_file(mZipArchive, mZipArchive, zipEntryIndex, flags, 0, -1, nullptr);
+    if (!src) {
+        SPDLOG_TRACE("Failed to create source for file {} in zip archive {}.", filePath, GetPath());
+        return nullptr;
+    }
+
+    if (zip_source_open(src) < 0) {
+        SPDLOG_TRACE("Failed to open source for file {} in zip archive {}: {}.", filePath, GetPath(),
+                     zip_error_strerror(zip_source_error(src)));
+        zip_source_free(src);
         return nullptr;
     }
 
     auto fileToLoad = std::make_shared<File>();
-    fileToLoad->Buffer = std::make_shared<std::vector<char>>(zipEntryStat.size);
+    fileToLoad->Buffer = std::make_shared<Buffer>(zipEntryStat.size);
 
-    if (zip_fread(zipEntryFile, fileToLoad->Buffer->data(), zipEntryStat.size) < 0) {
-        SPDLOG_TRACE("Error reading file {} in zip archive  {}.", filePath, GetPath());
+    zip_int64_t readBytes = zip_source_read(src, fileToLoad->Buffer->data(), zipEntryStat.size);
+    if (readBytes < 0 || (uint64_t)readBytes != zipEntryStat.size) {
+        SPDLOG_TRACE("Error reading file {} in zip archive {}: {}.", filePath, GetPath(),
+                     zip_error_strerror(zip_source_error(src)));
     }
 
-    if (zip_fclose(zipEntryFile) != 0) {
-        SPDLOG_TRACE("Error closing file {} in zip archive  {}.", filePath, GetPath());
-    }
+    zip_source_close(src);
 
     fileToLoad->IsLoaded = true;
 

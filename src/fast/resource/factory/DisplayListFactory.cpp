@@ -4,6 +4,8 @@
 #include "libultraship/libultra/gbi.h"
 #include "fast/lus_gbi.h"
 #include <tinyxml2.h>
+#include "ship/Context.h"
+#include "ship/resource/ResourceManager.h"
 
 namespace Fast {
 std::unordered_map<std::string, uint32_t> renderModes = {
@@ -204,6 +206,16 @@ ResourceFactoryBinaryDisplayListV0::ReadResource(std::shared_ptr<Ship::File> fil
             displayList->Instructions.push_back(command);
             command.words.w0 = reader->ReadUInt32();
             command.words.w1 = reader->ReadUInt32();
+
+            // Preload dependencies
+            if (opcode == G_SETTIMG_OTR_HASH || opcode == G_DL_OTR_HASH || opcode == G_VTX_OTR_HASH) {
+                uint64_t hash = ((uint64_t)command.words.w0 << 32) + (uint64_t)command.words.w1;
+                auto resourceManager = Ship::Context::GetInstance()->GetResourceManager();
+                const char* fileName = resourceManager->GetArchiveManager()->HashToCString(hash);
+                if (fileName != nullptr) {
+                    resourceManager->LoadResourceAsync(fileName, false, BS::pr::highest);
+                }
+            }
         }
 
 #ifdef USE_GBI_TRACE
@@ -472,6 +484,9 @@ ResourceFactoryXMLDisplayListV0::ReadResource(std::shared_ptr<Ship::File> file,
             dl->Strings.push_back(str);
             strcpy((char*)str, fName.data());
 
+            // Preload
+            Ship::Context::GetInstance()->GetResourceManager()->LoadResourceAsync(str, false, BS::pr::highest);
+
             g = GsSpVertexOtR2P1(str);
 
             dl->Instructions.push_back(g);
@@ -520,6 +535,13 @@ ResourceFactoryXMLDisplayListV0::ReadResource(std::shared_ptr<Ship::File> file,
             if (fName[0] == '>' && fName[1] == '0' && (fName[2] == 'x' || fName[2] == 'X')) {
                 uint32_t seg = std::stoul(fName.substr(1), nullptr, 16);
                 g = { gsDPSetTextureImage(fmtVal, sizVal, width, seg | 1) };
+
+                // Preload
+                auto resourceManager = Ship::Context::GetInstance()->GetResourceManager();
+                const char* fileName = resourceManager->GetArchiveManager()->HashToCString(seg | 1);
+                if (fileName != nullptr) {
+                    resourceManager->LoadResourceAsync(fileName, false, BS::pr::highest);
+                }
             } else {
                 g = { gsDPSetTextureImage(fmtVal, sizVal, width, 0) };
                 g.words.w0 &= 0x00FFFFFF;
@@ -528,6 +550,9 @@ ResourceFactoryXMLDisplayListV0::ReadResource(std::shared_ptr<Ship::File> file,
                 dl->Strings.push_back(str);
                 g.words.w1 = (uintptr_t)str;
                 strcpy((char*)g.words.w1, fName.data());
+
+                // Preload
+                Ship::Context::GetInstance()->GetResourceManager()->LoadResourceAsync(str, false, BS::pr::highest);
             }
 
             dl->Instructions.push_back(g);
@@ -1028,10 +1053,20 @@ ResourceFactoryXMLDisplayListV0::ReadResource(std::shared_ptr<Ship::File> file,
             if (dlPath[0] == '>' && dlPath[1] == '0' && (dlPath[2] == 'x' || dlPath[2] == 'X')) {
                 uint32_t seg = std::stoul(dlPath.substr(1), nullptr, 16);
                 g = { gsSPBranchListOTRHash(seg | 1) };
+
+                // Preload
+                auto resourceManager = Ship::Context::GetInstance()->GetResourceManager();
+                const char* fileName = resourceManager->GetArchiveManager()->HashToCString(seg | 1);
+                if (fileName != nullptr) {
+                    resourceManager->LoadResourceAsync(fileName, false, BS::pr::highest);
+                }
             } else {
                 char* dlPath2 = (char*)malloc(strlen(dlPath.c_str()) + 1);
                 dl->Strings.push_back(dlPath2);
                 strcpy(dlPath2, dlPath.c_str());
+
+                // Preload
+                Ship::Context::GetInstance()->GetResourceManager()->LoadResourceAsync(dlPath2, false, BS::pr::highest);
 
                 g = gsSPBranchListOTRFilePath(dlPath2);
             }
@@ -1040,10 +1075,20 @@ ResourceFactoryXMLDisplayListV0::ReadResource(std::shared_ptr<Ship::File> file,
             if (dlPath[0] == '>' && dlPath[1] == '0' && (dlPath[2] == 'x' || dlPath[2] == 'X')) {
                 uint32_t seg = std::stoul(dlPath.substr(1), nullptr, 16);
                 g = { gsSPDisplayList(seg | 1) };
+
+                // Preload
+                auto resourceManager = Ship::Context::GetInstance()->GetResourceManager();
+                const char* fileName = resourceManager->GetArchiveManager()->HashToCString(seg | 1);
+                if (fileName != nullptr) {
+                    resourceManager->LoadResourceAsync(fileName, false, BS::pr::highest);
+                }
             } else {
                 char* dlPath2 = (char*)malloc(strlen(dlPath.c_str()) + 1);
                 dl->Strings.push_back(dlPath2);
                 strcpy(dlPath2, dlPath.c_str());
+
+                // Preload
+                Ship::Context::GetInstance()->GetResourceManager()->LoadResourceAsync(dlPath2, false, BS::pr::highest);
 
                 g = gsSPDisplayListOTRFilePath(dlPath2);
             }

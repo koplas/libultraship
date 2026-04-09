@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ship/resource/Resource.h"
+#include "ship/utils/ShipBuffer.h"
 #include <memory>
 #include <vector>
 
@@ -38,7 +39,7 @@ class Texture final : public Ship::Resource<uint8_t> {
     uint32_t ImageDataSize;
     uint8_t* ImageData = nullptr;
     // When set, ImageData points into this buffer and must not be delete[]-ed.
-    std::shared_ptr<std::vector<char>> mImageBuffer;
+    std::shared_ptr<Ship::Buffer> mImageBuffer;
 
     ~Texture();
 };

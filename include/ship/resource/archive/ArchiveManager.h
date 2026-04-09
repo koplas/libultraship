@@ -7,6 +7,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <stdint.h>
+#include <mutex>
 #include "ship/resource/File.h"
 
 namespace Ship {
@@ -40,8 +41,8 @@ class ArchiveManager {
                                                         const std::list<std::string>& excludes);
     std::shared_ptr<std::vector<std::string>> ListDirectories(const std::string& searchMask = "");
     std::vector<uint32_t> GetGameVersions();
-    const std::string* HashToString(uint64_t hash) const;
-    const char* HashToCString(uint64_t hash) const;
+    const std::string* HashToString(uint64_t hash);
+    const char* HashToCString(uint64_t hash);
     bool IsGameVersionValid(uint32_t gameVersion);
 
   protected:
@@ -56,5 +57,6 @@ class ArchiveManager {
     std::unordered_map<uint64_t, std::string> mHashes;
     std::unordered_set<std::string> mDirectories;
     std::unordered_map<uint64_t, std::shared_ptr<Archive>> mFileToArchive;
+    std::recursive_mutex mMutex;
 };
 } // namespace Ship
